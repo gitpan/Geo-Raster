@@ -794,7 +794,82 @@ ral_ctgetb(ct, i)
 	color_table *ct
 	int i
 
-#ifdef HAVE_NETPBM
+#ifndef HAVE_NETPBM
+
+int
+have_netpbm()
+	CODE:
+	{	
+		RETVAL = 0;
+  	}
+  OUTPUT:
+    RETVAL
+
+grid *
+ral_ppm2gd(datatype, infile, channel)
+	int datatype
+	char *infile
+	int channel
+	CODE:
+	{	
+		fprintf(stderr,"ERROR: Netpbm is not available!\n");
+		RETVAL = NULL;
+  	}
+  OUTPUT:
+    RETVAL
+
+int
+ral_gd2ppm(gd, outfile, ct)
+	grid *gd
+	char *outfile
+	color_table *ct
+	CODE:
+	{	
+		fprintf(stderr,"ERROR: Netpbm is not available!\n");
+		RETVAL = 0;
+  	}
+  OUTPUT:
+    RETVAL
+
+int 
+ral_RGBgd2ppm(R, G, B, outfile)
+	grid *R
+	grid *G
+	grid *B
+	char *outfile
+	CODE:
+	{	
+		fprintf(stderr,"ERROR: Netpbm is not available!\n");
+		RETVAL = 0;
+  	}
+  OUTPUT:
+    RETVAL
+
+int 
+ral_HSVgd2ppm(H, S, V, outfile)
+	grid *H
+	grid *S
+	grid *V
+	char *outfile
+	CODE:
+	{	
+		fprintf(stderr,"ERROR: Netpbm is not available!\n");
+		RETVAL = 0;
+  	}
+  OUTPUT:
+    RETVAL
+
+
+#else
+
+int
+have_netpbm()
+	CODE:
+	{	
+		RETVAL = 1;
+  	}
+  OUTPUT:
+    RETVAL
 
 grid *
 ral_ppm2gd(datatype, infile, channel)
@@ -926,7 +1001,67 @@ ral_vdaddpolygon(vd, polygon)
 	vector_data *vd
 	polygon_data *polygon
 
-#ifdef HAVE_PGPLOT
+#ifndef HAVE_PGPLOT
+
+int
+have_pgplot()
+	CODE:
+	{	
+		RETVAL = 0;
+  	}
+  OUTPUT:
+    RETVAL
+
+int 
+ral_gdwindow_open()
+	CODE:
+	{	
+		fprintf(stderr,"ERROR: PGPLOT is not available!\n");
+		RETVAL = 0;
+  	}
+  OUTPUT:
+    RETVAL
+
+int 
+ral_gdwindow_close(window)
+	int window
+	CODE:
+	{	
+		fprintf(stderr,"ERROR: PGPLOT is not available!\n");
+		RETVAL = 0;
+  	}
+  OUTPUT:
+    RETVAL
+
+grid *
+ral_gdplot(gd, vd, device, window, ct, draw, options, default_width)
+	grid *gd
+	vector_data *vd
+	char *device
+	int window
+	color_table *ct
+	int draw
+	int options
+	int default_width
+	CODE:
+	{	
+		fprintf(stderr,"ERROR: PGPLOT is not available!\n");
+		RETVAL = NULL;
+  	}
+  OUTPUT:
+    RETVAL
+
+
+#else
+
+int
+have_pgplot()
+	CODE:
+	{	
+		RETVAL = 1;
+  	}
+  OUTPUT:
+    RETVAL
 
 int 
 ral_gdwindow_open()

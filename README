@@ -45,6 +45,9 @@ make install
 Geo::RasterAlgebra requires the Raster Algebra Library libral. libral
 is at <http://sourceforge.net/projects/libral>.
 
+Required modules are ExtUtils::Depends and ExtUtils:F77 if PGPLOT is
+found.
+
 Documentation is in the module file and will be added onto
 perllocal.pod as usual.
 

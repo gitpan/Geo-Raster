@@ -99,7 +99,10 @@ Revision history for Perl extension Geo::RasterAlgebra, formerly (Grid).
 	- fixed a fabs bug which screwed up aspect calculations among other things
 0.12 never released
 	- Timeseries and DBI::Tools separated
-0.20 released
+0.20 released Nov 22 2004
 	- changed name to Geo::Raster and upload to CPAN
 	- grid C code is now libral in sourceforge
 	- removed vector code, e.g., voronoi diagram
+0.21 released
+	- better detection of libral location
+	- test functions have_netpbm and have_pgplot

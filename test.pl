@@ -161,6 +161,11 @@ if ($x1 == -1 and $x2 == 0 and $y1 == 1 and $y2 == 0) {
     print "not ok $x1 != -1 or $x2 != 0 or $y1 != 1 or $y2 != 0 $test\n";
 }
 
+unless (&Geo::Raster::have_pgplot) {
+    print "skipping graphical tests since PGPLOT is not available\n";
+    exit;
+}
+
 ### Demonstrate basic graphical capacity
 ###
 
@@ -177,7 +182,7 @@ print "\nLet's look at this grid, which has the size M (height) = $M, N (width) 
 print "There should be a white rectangle at cell (i,j)=($i,$j), i.e., (x,y)=($x,$y)\n";
 print "and a grey rectangle at cell (i,j)=($i2,$j2), i.e., (x,y)=($x2,$y2).\n";
 
-$check = $gd->plot('/xserve');
+$check = $gd->plot();
 print "\npress any key to continue:";
 $check = <STDIN>;
 
@@ -187,7 +192,7 @@ $gd->map(\%map);
 
 print "The white rectangle (value $a) should now be grey (value $b) and vice versa.\n";
 print "This a the result of a mapping with a hash ($a=>$b,$b=>$a).\n";
-$check = $gd->plot('/xserve');
+$check = $gd->plot();
 print "\npress any key to continue:";
 $check = <STDIN>;
 
@@ -202,7 +207,7 @@ for $i (0..$M-1) {
     }
 }
 
-$gd->plot('/xserve');
+$gd->plot();
 print "\npress any key to continue:";
 $check = <STDIN>;
 
@@ -212,7 +217,7 @@ $g2 = new Geo::Raster($gd);
 $g2 *= -1;
 $g2 += $maxval;
 
-$g2->plot('/xserve');
+$g2->plot();
 print "\npress any key to continue:";
 $check = <STDIN>;
 
@@ -222,14 +227,14 @@ $gx = new Geo::Raster $gd;
 $gx->setbounds(unitdist=>$unitdist,minX=>$minX,minY=>$maxY);
 $gjoin = &Geo::Raster::join($g2,$gx);
 
-$gjoin->plot('/xserve');
+$gjoin->plot();
 print "\npress any key to continue:";
 $check = <STDIN>;
 
 print "\nMultiply grids A and B.\n";
 $g2 *= $gd;
 
-$g2->plot('/xserve');
+$g2->plot();
 print "\npress any key to continue:";
 $check = <STDIN>;
 
@@ -237,7 +242,7 @@ print "\nThreshold by comparing the grid to a scalar to find the area with value
 print "You may also compare two grids.\n";
 $g3 = $g2 < 500;
 
-$g3->plot('/xserve');
+$g3->plot();
 print "\npress any key to continue:";
 $check = <STDIN>;
 

@@ -1,17 +1,23 @@
 use ExtUtils::MakeMaker;
 use ExtUtils::Depends; 
+eval "use ExtUtils::F77;";
+unless ($@) {
+    $F77 = 1;
+}
 
 # search for ral_config.h
 
 my($pgplot_inc,$pgplot_libs,$netpbm_libs,$ral_libs) = ('','','','');
 
 my $ral_config;
-for ('/usr/include/ral_config.h','/usr/local/include/ral_config.h') {
-    next unless -f $_;
-    $ral_config = $_;
+for ($ENV{RAL_PREFIX},'/usr','/usr/local') {
+    next unless -f "$_/include/ral_config.h";
+    $ral_prefix = $_;
+    $ral_config = "$_/include/ral_config.h";
 }
 unless ($ral_config) {
-    print "Can't find ral_config.h, unable to continue\n";
+    print "Can't find ral_config.h, unable to continue.\n";
+    print "Consider export RAL_PREFIX=DIR; perl Makefile.PL\n";
     exit 1;
 }
 print "Using $ral_config for libral configuration.\n";
@@ -27,21 +33,20 @@ while (<CONFIG>) {
 	    next unless -f "$_/cpgplot.h";
 	    $pgplot_dir = $_;
 	}
-	unless ($pgplot_dir) {
-	    print "Can't find PGPLOT, unable to continue\n";
-	    exit 1;
-	}
-	print "Using PGPLOT in $pgplot_dir.\n";
+	die "Can't find PGPLOT\n" unless $pgplot_dir;
 
-	use ExtUtils::F77;
+	print "Using PGPLOT from $pgplot_dir.\n";
+
+	die "ExtUtils::F77 not available, it is need to link to PGPLOT" unless $F77;
+	
 	$pgplot_inc = " -I$pgplot_dir";
 	$pgplot_libs = ExtUtils::F77->runtime . " -L$pgplot_dir -lcpgplot -lpgplot";
     }
 }
 close CONFIG;
 
-$ral_libs = ' -lral';
-
+$ral_inc = " -I$ral_prefix/include";
+$ral_libs = " -L$ral_prefix/lib -lral";
 
 
 # check for the modules required by Geo::Raster
@@ -73,7 +78,7 @@ if ($missing_modules) {
 
 $package = new ExtUtils::Depends('Geo::Raster');
 
-$package->set_inc($pgplot_inc);
+$package->set_inc($pgplot_inc . $ral_inc);
 $package->set_libs($pgplot_libs . $netpbm_libs . $ral_libs);
 
 $package->add_typemaps("typemap");

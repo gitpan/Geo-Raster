@@ -9,7 +9,7 @@ use Config; # for byteorder
 use vars qw(@ISA @EXPORT %EXPORT_TAGS @EXPORT_OK $AUTOLOAD 
 	    $VERSION $BYTE_ORDER $dbh $INTEGER_GRID $REAL_GRID);
 
-$VERSION = '0.20';
+$VERSION = '0.21';
 
 # TODO: make these constants:
 $INTEGER_GRID = 1;
