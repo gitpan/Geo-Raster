@@ -1,0 +1,111 @@
+Perl Module Geo::RasterAlgebra - 0.20
+
+     Copyright (c) 1999-2004 Ari Jolma. All rights reserved.
+     This program is free software; you can redistribute it and/or
+     modify it under the same terms as Perl itself. That is, using
+     either
+
+	a) the GNU General Public License as published by the Free
+	Software Foundation; or
+
+	b) the "Artistic License".
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See either
+    the GNU General Public License or the Artistic License for more details.
+
+    You should have received a copy of the Artistic License with this
+    Kit, in the file named "Artistic".  If not, get it from
+    http://www.perl.com/language/misc/Artistic.html.
+
+    You should also have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software Foundation,
+    Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307, USA.
+
+ACKNOWLEDGEMENTS
+
+array.c and array.h are taken from the Karl Glazebrook's PGPLOT
+distribution.
+
+function gdline in grid.c is taken from Thomas Boutell's gd library.
+
+excerpts from the pgplot.doc are Copyright (c) 1983-1997 by the
+California Institute of Technology.
+
+INSTALLATION
+
+To install, unzip and untar the archive. In the directory created type
+
+perl Makefile.pl
+make
+make test
+make install
+
+Geo::RasterAlgebra requires the Raster Algebra Library libral. libral
+is at <http://sourceforge.net/projects/libral>.
+
+Documentation is in the module file and will be added onto
+perllocal.pod as usual.
+
+DESCRIPTION
+
+Geo::RasterAlgebra has three purposes/goals:
+
+1. To be a general purpose Perl/C tool for large 2-dimensional
+   grids or matrixes of integer and/or real numbers. Large
+   means too large/slow to handle in just Perl.
+
+2. To be a general purpose Perl/C tool for doing raster GIS
+   (Geographic Information System) work. This means "raster/map
+   algebra" (overlaying and masking DEMs (Digital Elevation Models),
+   land-use rasters, etc), spatial analyses (kriging, ...), 
+   extracting indices from the grids (histograms, ...), interactive
+   display, etc.
+
+3. To be a general purpose Perl/C tool for doing hydrologic and
+   water resources GIS work. This means watershed delineation,
+   finding stream networks, calculating indices (topographic
+   index, ...), preparing data for hydrologic models,
+   developing spatially distributed hydrologic modeling, etc.
+
+I'm interested in the section 3. but I could not find good support for
+sections 1. and 2 (in the sense of playing with number 3). so I
+included them into this project.
+
+The small script rash.pl uses Term::ReadLine and is used to implement
+a simple but very useful environment for "doing raster algebra GIS
+with Perl". The rash.pl can have a live connection to gnuplot and
+Postgres (if invoked with option -a), this is on a basic level now,
+for example histograms are simple to plot and rgb values for a grid
+can be retrieved from a database.
+
+NOTES
+
+The library uses non-portable(?) binary format to store the grids.
+The default format is hdr/bil.
+
+THE DEMO
+
+The demo, which is a part of the test suite, is a demonstration of
+basin delineation and derivation of stream network and
+subcatchments. The data which is used is real but the world
+coordinates and name are hidden not to reveal the true identity of the
+place.
+
+OTHER SOFTWARE
+
+Other software with more or less similar aims but not related to
+Grid.pm:
+
+PCRaster http://www.geog.uu.nl/pcraster.html
+RiverTools http://cires.colorado.edu/people/peckham.scott/RT.html
+TAPES http://cres.anu.edu.au/software/tapes.html
+TARDEM http://www.engineering.usu.edu/dtarb/tardem.html
+TOPOG http://www.clw.csiro.au/topog/user/user.html
+TOPAZ http://grl.ars.usda.gov/topaz/TOPAZ1.HTM
+
+and of course
+
+GRASS http://www.baylor.edu/~grass/
+ARC/INFO http://www.esri.com/software/arcinfo/index.html

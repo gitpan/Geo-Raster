@@ -1,0 +1,18 @@
+TYPEMAP
+	grid * T_PTROBJ
+	cell * T_PTROBJ
+	color_table * T_PTROBJ
+	vector_data * T_PTROBJ
+	point_data * T_PTROBJ
+	lseg_data * T_PTROBJ
+	polygon_data * T_PTROBJ
+	double * T_DOUBLEP
+	int * T_INTP
+
+INPUT
+
+T_DOUBLEP
+        $var = ($type)pack1D($arg,'d')
+
+T_INTP
+        $var = ($type)pack1D($arg,'i')

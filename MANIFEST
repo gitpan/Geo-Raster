@@ -1,0 +1,20 @@
+Artistic		The "Artistic License"
+Changes			Differences from previous version
+Copying			The GNU General Public License
+MANIFEST		This file
+README
+TODO
+Raster.pm
+Raster.xs
+Makefile.PL
+test.pl
+typemap
+arrays.c
+arrays.h
+data/dem.doc
+data/dem.img
+data/lake.bil
+data/lake.hdr
+rash
+
+META.yml                                 Module meta-data (added by MakeMaker)
