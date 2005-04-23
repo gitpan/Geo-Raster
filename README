@@ -1,6 +1,6 @@
-Perl Module Geo::RasterAlgebra - 0.20
+Perl Module Geo::RasterAlgebra - 0.31
 
-     Copyright (c) 1999-2004 Ari Jolma. All rights reserved.
+     Copyright (c) 1999- Ari Jolma. All rights reserved.
      This program is free software; you can redistribute it and/or
      modify it under the same terms as Perl itself. That is, using
      either
@@ -27,8 +27,6 @@ ACKNOWLEDGEMENTS
 
 array.c and array.h are taken from the Karl Glazebrook's PGPLOT
 distribution.
-
-function gdline in grid.c is taken from Thomas Boutell's gd library.
 
 excerpts from the pgplot.doc are Copyright (c) 1983-1997 by the
 California Institute of Technology.
@@ -63,18 +61,13 @@ Geo::RasterAlgebra has three purposes/goals:
    (Geographic Information System) work. This means "raster/map
    algebra" (overlaying and masking DEMs (Digital Elevation Models),
    land-use rasters, etc), spatial analyses (kriging, ...), 
-   extracting indices from the grids (histograms, ...), interactive
-   display, etc.
+   extracting indices from the grids (histograms, ...), etc
 
 3. To be a general purpose Perl/C tool for doing hydrologic and
    water resources GIS work. This means watershed delineation,
    finding stream networks, calculating indices (topographic
    index, ...), preparing data for hydrologic models,
    developing spatially distributed hydrologic modeling, etc.
-
-I'm interested in the section 3. but I could not find good support for
-sections 1. and 2 (in the sense of playing with number 3). so I
-included them into this project.
 
 The small script rash.pl uses Term::ReadLine and is used to implement
 a simple but very useful environment for "doing raster algebra GIS
@@ -83,32 +76,7 @@ Postgres (if invoked with option -a), this is on a basic level now,
 for example histograms are simple to plot and rgb values for a grid
 can be retrieved from a database.
 
-NOTES
+For a GUI (with a CLI capability) look for Gtk2::Ex::Geo also in CPAN.
 
-The library uses non-portable(?) binary format to store the grids.
-The default format is hdr/bil.
+Geo::Raster is an interface to the libral code and then some.
 
-THE DEMO
-
-The demo, which is a part of the test suite, is a demonstration of
-basin delineation and derivation of stream network and
-subcatchments. The data which is used is real but the world
-coordinates and name are hidden not to reveal the true identity of the
-place.
-
-OTHER SOFTWARE
-
-Other software with more or less similar aims but not related to
-Grid.pm:
-
-PCRaster http://www.geog.uu.nl/pcraster.html
-RiverTools http://cires.colorado.edu/people/peckham.scott/RT.html
-TAPES http://cres.anu.edu.au/software/tapes.html
-TARDEM http://www.engineering.usu.edu/dtarb/tardem.html
-TOPOG http://www.clw.csiro.au/topog/user/user.html
-TOPAZ http://grl.ars.usda.gov/topaz/TOPAZ1.HTM
-
-and of course
-
-GRASS http://www.baylor.edu/~grass/
-ARC/INFO http://www.esri.com/software/arcinfo/index.html

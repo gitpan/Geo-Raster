@@ -11,10 +11,13 @@ test.pl
 typemap
 arrays.c
 arrays.h
-data/dem.doc
-data/dem.img
-data/lake.bil
+data/dem.hdr
+data/dem.bil
 data/lake.hdr
+data/lake.bil
+data/landcover.hdr
+data/landcover.bil
+data/landcover.clr
 rash
 
 META.yml                                 Module meta-data (added by MakeMaker)

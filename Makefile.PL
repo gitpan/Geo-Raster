@@ -10,19 +10,32 @@ unless ($@) {
 my($pgplot_inc,$pgplot_libs,$netpbm_libs,$ral_libs) = ('','','','');
 
 my $ral_config;
-for ($ENV{RAL_PREFIX},'/usr','/usr/local') {
-    next unless -f "$_/include/ral_config.h";
-    $ral_prefix = $_;
-    $ral_config = "$_/include/ral_config.h";
+for ($ENV{RAL_DIR},'/usr/include','/usr/local/include') {
+    print "$_/ral_config.h\n";
+    next unless -f "$_/ral_config.h";
+    $ral_dir = $_;
+    $ral_config = "$_/ral_config.h";
+    last;
 }
 unless ($ral_config) {
     print "Can't find ral_config.h, unable to continue.\n";
-    print "Consider export RAL_PREFIX=DIR; perl Makefile.PL\n";
+    print "Consider export RAL_DIR=DIR; perl Makefile.PL\n";
     exit 1;
 }
 print "Using $ral_config for libral configuration.\n";
+my $version;
+open PM,'Raster.pm' or die "Raster.pm: $!";
+while (<PM>) {
+    if (/\$VERSION = \'([\d\.]+)\'/) {
+	$version = $1;
+    }
+}
+close PM;
 open CONFIG,$ral_config or die "$ral_config: $!";
 while (<CONFIG>) {
+    if (/PACKAGE_VERSION "([\d\.]+)"/) {
+	die "the version of libral (=$1) is newer than that of this (=$version)!" if $1 > $version;
+    }
     if (/#define\s+HAVE_NETPBM\s+1/) {
 	$netpbm_libs = ' -lnetpbm -L/usr/X11R6/lib -lX11';
     }
@@ -40,13 +53,19 @@ while (<CONFIG>) {
 	die "ExtUtils::F77 not available, it is need to link to PGPLOT" unless $F77;
 	
 	$pgplot_inc = " -I$pgplot_dir";
-	$pgplot_libs = ExtUtils::F77->runtime . " -L$pgplot_dir -lcpgplot -lpgplot";
+	$pgplot_libs = ExtUtils::F77->runtime . " -lpng -L$pgplot_dir -lcpgplot -lpgplot";
     }
 }
 close CONFIG;
 
-$ral_inc = " -I$ral_prefix/include";
-$ral_libs = " -L$ral_prefix/lib -lral";
+$ral_inc = " -I$ral_dir";
+if ($ral_dir =~ /\/include$/) {
+    $ral_dir =~ s/\/include$//;
+    $ral_dir .= '/lib';
+} else {
+    $ral_dir .= '/.libs';
+}
+$ral_libs = " -L$ral_dir -lral";
 
 
 # check for the modules required by Geo::Raster
@@ -91,10 +110,20 @@ our %pm_files = (
 
 $package->add_pm (%pm_files);
 
+#       
+
 WriteMakefile(
 	      'NAME'	     => 'Geo::Raster',
 	      'VERSION_FROM' => 'Raster.pm',
 	      $package->get_makefile_vars(),
 	      'EXE_FILES' => [ 'rash' ],
+	      MYEXTLIB => "$ral_dir/libral\$(LIB_EXT)",
+	      CCFLAGS => '-O2 -fno-builtin -ansi'
 	      );
 
+sub My::postamble {
+"
+\$(MYEXTLIB): $ral_dir/Makefile
+	cd $ral_dir && \$(MAKE) \$(PASTHRU)
+";
+}

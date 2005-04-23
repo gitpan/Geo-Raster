@@ -12,6 +12,7 @@ extern "C" {
 #include "ral_hash.h"
 #include "ral_vd.h"
 #include "ral_grid.h"
+#include "ral_read.h"
 #include "ral_grid_rw.h"
 #include "ral_ct.h"
 #include "ral_plot.h"
@@ -30,6 +31,18 @@ int
 ral_setdebug(dbg)
 	int dbg
 
+#else
+
+int 
+ral_setdebug(dbg)
+	int dbg
+	CODE:
+	{
+		RETVAL = 1;
+	}
+  OUTPUT:
+    RETVAL
+
 #endif
 
 #ifdef USE_PROGRESS_BAR
@@ -37,6 +50,18 @@ ral_setdebug(dbg)
 int 
 ral_sethashmarks(h)
 	int h
+
+#else 
+
+int 
+ral_sethashmarks(h)
+	int h
+	CODE:
+	{
+		RETVAL = 1;
+	}
+  OUTPUT:
+    RETVAL
 
 #endif
 
@@ -68,7 +93,7 @@ ral_gdremovemask()
   OUTPUT:
     RETVAL
 
-int 
+void
 ral_gddestroy(gd)
 	grid *gd
 
@@ -78,213 +103,164 @@ ral_gdnew(datatype, M, N)
 	int M
 	int N
 
-int
-ral_gdcopy(to, from)
-	grid *to
-	grid *from
-
 grid *
-ral_gdcreatecopy(gd, datatype)
+ral_gdnewlike(gd, datatype)
 	grid *gd
 	int datatype
 
 grid *
-ral_gdopen(basename)
-	char *basename
+ral_gdnewcopy(gd, datatype)
+	grid *gd
+	int datatype
 
 int 
-ral_gdread(gd, basename, ext, el_size, byteorder)
+ral_gdread(gd, filename, el_type, byteorder)
 	grid *gd
-	char *basename
-	char *ext
-	int el_size
+	char *filename
+	int el_type
 	int byteorder
 
 int 
-ral_gdsave(gd, basename)
+ral_gdwrite(gd, filename)
 	grid *gd
-	char *basename
-
-int 
-ral_gdwrite(gd, basename, ext)
-	grid *gd
-	char *basename
-	char *ext
+	char *filename
 
 int
-ral_gdgetM(gd)
+ral_gdget_height(gd)
 	grid *gd
 
 int
-ral_gdgetN(gd)
+ral_gdget_width(gd)
 	grid *gd
 
 int
-ral_gddatatype(gd)
+ral_gdget_datatype(gd)
 	grid *gd
 
-int 
-ral_gdget_nodata_value_int(gd)
+SV * 
+_ral_gdget_nodata_value(gd)
 	grid *gd
+	CODE:
+	{
+		SV *sv;
+		switch (gd->datatype) {
+		case INTEGER_GRID:
+			sv = newSViv(IGD_NODATA_VALUE(gd));
+			break;
+		case REAL_GRID:
+			sv = newSVnv(RGD_NODATA_VALUE(gd));
+		}
+		RETVAL = sv;
+	}
+  OUTPUT:
+    RETVAL
 
-double 
-ral_gdget_nodata_value_real(gd)
+void 
+ral_gdset_integer_nodata_value(gd, nodata_value)
 	grid *gd
+	INTEGER nodata_value
 
-int 
-ral_gdset_nodata_value_int(gd, nodata)
+int
+ral_gdset_real_nodata_value(gd, nodata_value)
 	grid *gd
-	int nodata
-
-int 
-ral_gdset_nodata_value_real(gd, nodata)
-	grid *gd
-	double nodata
+	REAL nodata_value
 
 double
-ral_gdunitdist(gd)
-	grid *gd
-
-double 
-ral_gdminX(gd)
-	grid *gd
-
-double 
-ral_gdmaxX(gd)
-	grid *gd
-
-double 
-ral_gdminY(gd)
-	grid *gd
-
-double 
-ral_gdmaxY(gd)
-	grid *gd
-
-int
-ral_gdsetbounds(gd, unitdist, minX, minY)
-	grid *gd
-	double unitdist
-	double minX
-	double minY
-
-int
-ral_gdsetbounds2(gd, unitdist, minX, maxY)
-	grid *gd
-	double unitdist
-	double minX
-	double maxY
-
-int
-ral_gdsetbounds3(gd, unitdist, maxX, minY)
-	grid *gd
-	double unitdist
-	double maxX
-	double minY
-
-int
-ral_gdsetbounds4(gd, minX, maxX, minY)
-	grid *gd
-	double minX
-	double maxX
-	double minY
-
-int
-ral_gdsetbounds5(gd, minX, maxX, maxY)
-	grid *gd
-	double minX
-	double maxX
-	double maxY
-
-int
-ral_gdsetbounds6(gd, minX, minY, maxY)
-	grid *gd
-	double minX
-	double minY
-	double maxY
-
-int
-ral_gdsetbounds7(gd, maxX, minY, maxY)
-	grid *gd
-	double maxX
-	double minY
-	double maxY
-
-int 
-ral_gdcopybounds(from, to)
-	grid *from
-	grid *to
-
-int 
-ral_gdx2j(gd, x)
-	grid *gd
-	double x
-
-int 
-ral_gdy2i(gd, y)
-	grid *gd
-	double y
-
-double 
-ral_gdj2x(gd, j)
-	grid *gd
-	int j
-
-double 
-ral_gdi2y(gd, i)
-	grid *gd
-	int i
-
-int 
-ral_gdset(gd, i, j, x)
-	grid *gd
-	int i
-	int j
-	double x
-
-int 
-ral_gdset2(gd, i, j, x)
-	grid *gd
-	int i
-	int j
-	int x
-
-int 
-ral_gdsetnodata(gd, i, j)
-	grid *gd
-	int i
-	int j
-
-double 
-ral_gdget(gd, i, j)
-	grid *gd
-	int i
-	int j
-
-int 
-ral_gdget2(gd, i, j)
-	grid *gd
-	int i
-	int j
-
-int 
-ral_gdsetminmax(gd)
-	grid *gd
-
-double 
-ral_gdgetminval(gd)
-	grid *gd
-
-double 
-ral_gdgetmaxval(gd)
+ral_gdget_unit_length(gd)
 	grid *gd
 
 AV *
-_gdgetmin(gd)
+_ral_gdget_world(gd)
 	grid *gd
 	CODE:
 	{
-		cell c = ral_gdgetmin(gd);
+		rectangle xy = ral_gdget_world(gd);
+		AV *av = newAV();
+		if (av) {
+			SV *sv = newSVnv(xy.min.x);
+			av_push(av, sv);
+			sv = newSVnv(xy.min.y);
+			av_push(av, sv);
+			sv = newSVnv(xy.max.x);
+			av_push(av, sv);
+			sv = newSVnv(xy.max.y);
+			av_push(av, sv);
+		}
+		RETVAL = av;
+	}
+  OUTPUT:
+    RETVAL
+
+void
+ral_gdset_bounds_unn(gd, unit_length, minX, minY)
+	grid *gd
+	double unit_length
+	double minX
+	double minY
+
+void
+ral_gdset_bounds_unx(gd, unit_length, minX, maxY)
+	grid *gd
+	double unit_length
+	double minX
+	double maxY
+
+void
+ral_gdset_bounds_uxn(gd, unit_length, maxX, minY)
+	grid *gd
+	double unit_length
+	double maxX
+	double minY
+
+void
+ral_gdset_bounds_uxx(gd, unit_length, maxX, maxY)
+	grid *gd
+	double unit_length
+	double maxX
+	double maxY
+
+void
+ral_gdset_bounds_nxn(gd, minX, maxX, minY)
+	grid *gd
+	double minX
+	double maxX
+	double minY
+
+void
+ral_gdset_bounds_nxx(gd, minX, maxX, maxY)
+	grid *gd
+	double minX
+	double maxX
+	double maxY
+
+void
+ral_gdset_bounds_nnx(gd, minX, minY, maxY)
+	grid *gd
+	double minX
+	double minY
+	double maxY
+
+void
+ral_gdset_bounds_xnx(gd, maxX, minY, maxY)
+	grid *gd
+	double maxX
+	double minY
+	double maxY
+
+void
+ral_gdcopy_bounds(from, to)
+	grid *from
+	grid *to
+
+AV *
+_ral_gdpoint2cell(gd, px, py)
+	grid *gd
+	double px
+	double py
+	CODE:
+	{
+		point p = {px,py};
+		cell c = ral_gdpoint2cell(gd, p);
 		AV *av = newAV();
 		if (av) {
 			SV *sv = newSViv(c.i);
@@ -297,17 +273,20 @@ _gdgetmin(gd)
   OUTPUT:
     RETVAL
 
-AV * 
-_gdgetmax(gd)
+AV *
+_ral_gdcell2point(gd, ci, cj)
 	grid *gd
+	int ci
+	int cj
 	CODE:
 	{
-		cell c = ral_gdgetmax(gd);
+		cell c = {ci,cj};
+		point p = ral_gdcell2point(gd, c);
 		AV *av = newAV();
 		if (av) {
-			SV *sv = newSViv(c.i);
+			SV *sv = newSVnv(p.x);
 			av_push(av, sv);
-			sv = newSViv(c.j);
+			sv = newSVnv(p.y);
 			av_push(av, sv);
 		}
 		RETVAL = av;
@@ -315,18 +294,125 @@ _gdgetmax(gd)
   OUTPUT:
     RETVAL
 
-int 
-ral_gdsetall_int(gd, x)
+
+SV *
+_ral_gdget(gd, ci, cj)
 	grid *gd
-	int x
+	int ci
+	int cj
+	CODE:
+	{
+		cell c = {ci,cj};
+		SV *sv;
+		if (GD_CELL_IN(gd, c)) {
+			if (gd->datatype == REAL_GRID) {
+				REAL x = RGD_CELL(gd, c);
+				if (x == RGD_NODATA_VALUE(gd)) 
+					sv = newSVpv("nodata",6);
+				else
+					sv = newSVnv(x);
+			} else {
+				INTEGER x = IGD_CELL(gd, c);
+				if (x == IGD_NODATA_VALUE(gd)) 
+					sv = newSVpv("nodata",6);
+				else
+					sv = newSViv(x);
+			}
+		} else {
+			sv = newSV(0);
+		}
+		RETVAL = sv;
+	}
+  OUTPUT:
+    RETVAL
 
 int 
-ral_gdsetall(gd, x)
+_ral_gdset_real(gd, ci, cj, x)
 	grid *gd
-	double x
+	int ci
+	int cj
+	REAL x
+	CODE:
+	{
+		cell c = {ci,cj};
+		int ret = ral_gdset_real(gd, c, x);
+		RETVAL = ret;
+	}
+  OUTPUT:
+    RETVAL
 
 int 
-ral_gdsetallnodata(gd)
+_ral_gdset_integer(gd, ci, cj, x)
+	grid *gd
+	int ci
+	int cj
+	INTEGER x
+	CODE:
+	{
+		cell c = {ci,cj};
+		int ret = ral_gdset_integer(gd, c, x);
+		RETVAL = ret;
+	}
+  OUTPUT:
+    RETVAL
+
+int 
+_ral_gdset_nodata(gd, ci, cj)
+	grid *gd
+	int ci
+	int cj
+	CODE:
+	{
+		cell c = {ci,cj};
+		int ret = ral_gdset_nodata(gd, c);
+		RETVAL = ret;
+	}
+  OUTPUT:
+    RETVAL
+
+
+void 
+ral_gdset_minmax(gd)
+	grid *gd
+
+AV *
+_ral_gdget_minmax(gd)
+	grid *gd
+	CODE:
+	{
+		AV *av = newAV();
+		switch (gd->datatype) {
+		case INTEGER_GRID: {
+			SV *sv = newSViv(IGD_VALUE_RANGE(gd)->min);
+			av_push(av, sv);
+			sv = newSViv(IGD_VALUE_RANGE(gd)->max);
+			av_push(av, sv);
+		}
+		break;
+		case REAL_GRID: {
+			SV *sv = newSVnv(RGD_VALUE_RANGE(gd)->min);
+			av_push(av, sv);
+			sv = newSVnv(RGD_VALUE_RANGE(gd)->max);
+			av_push(av, sv);
+		}
+		}
+		RETVAL = av;
+	}
+  OUTPUT:
+    RETVAL
+
+void 
+ral_gdset_all_integer(gd, x)
+	grid *gd
+	INTEGER x
+
+int 
+ral_gdset_all_real(gd, x)
+	grid *gd
+	REAL x
+
+void 
+ral_gdset_all_nodata(gd)
 	grid *gd
 
 int 
@@ -348,9 +434,14 @@ ral_gdorgd(gd1, gd2)
 	grid *gd2
 
 int 
-ral_gdaddsv(gd, x)
+ral_gdaddreal(gd, x)
 	grid *gd
-	double x
+	REAL x
+
+void
+ral_gdaddinteger(gd, x)
+	grid *gd
+	INTEGER x
 
 int 
 ral_gdaddgd(gd1, gd2)
@@ -363,9 +454,14 @@ ral_gdsubgd(gd1, gd2)
 	grid *gd2
 
 int 
-ral_gdmultsv(gd, x)
+ral_gdmultreal(gd, x)
 	grid *gd
-	double x
+	REAL x
+
+void
+ral_gdmultinteger(gd, x)
+	grid *gd
+	INTEGER x
 
 int 
 ral_gdmultgd(gd1, gd2)
@@ -373,13 +469,23 @@ ral_gdmultgd(gd1, gd2)
 	grid *gd2
 
 int 
-ral_gddivsv(gd, x)
+ral_gddivreal(gd, x)
 	grid *gd
-	double x
+	REAL x
+
+int 
+ral_gddivinteger(gd, x)
+	grid *gd
+	INTEGER x
 
 int
-ral_svdivgd(x, gd)
-	double x
+ral_realdivgd(x, gd)
+	REAL x
+	grid *gd
+
+int
+ral_integerdivgd(x, gd)
+	INTEGER x
 	grid *gd
 
 int 
@@ -390,11 +496,11 @@ ral_gddivgd(gd1, gd2)
 int 
 ral_gdmodulussv(gd, x)
 	grid *gd
-	double x
+	REAL x
 
 int
 ral_svmodulusgd(x, gd)
-	double x
+	INTEGER x
 	grid *gd
 
 int 
@@ -403,13 +509,13 @@ ral_gdmodulusgd(gd1, gd2)
 	grid *gd2
 
 int 
-ral_gdpowersv(gd, x)
+ral_gdpowerreal(gd, x)
 	grid *gd
-	double x
+	REAL x
 
 int
-ral_svpowergd(x, gd)
-	double x
+ral_realpowergd(x, gd)
+	REAL x
 	grid *gd
 
 int 
@@ -417,7 +523,7 @@ ral_gdpowergd(gd1, gd2)
 	grid *gd1
 	grid *gd2
 
-int 
+void
 ral_gdabs(gd)
 	grid *gd
 
@@ -463,11 +569,6 @@ ral_gdlog10(gd)
 	grid *gd
 
 int 
-ral_gdpow(gd, b)
-	grid *gd
-	double b
-
-int 
 ral_gdsin(gd)
 	grid *gd
 
@@ -492,39 +593,74 @@ ral_gdround(gd)
 	grid *gd
 
 int
-ral_gdltsv(gd, x)
+ral_gdltreal(gd, x)
 	grid *gd
-	double x
+	REAL x
 
 int
-ral_gdgtsv(gd, x)
+ral_gdgtreal(gd, x)
 	grid *gd
-	double x
+	REAL x
 
 int
-ral_gdlesv(gd, x)
+ral_gdlereal(gd, x)
 	grid *gd
-	double x
+	REAL x
 
 int
-ral_gdgesv(gd, x)
+ral_gdgereal(gd, x)
 	grid *gd
-	double x
+	REAL x
 
 int
-ral_gdeqsv(gd, x)
+ral_gdeqreal(gd, x)
 	grid *gd
-	double x
+	REAL x
 
 int
-ral_gdnesv(gd, x)
+ral_gdnereal(gd, x)
 	grid *gd
-	double x
+	REAL x
 
 int
-ral_gdcmpsv(gd, x)
+ral_gdcmpreal(gd, x)
 	grid *gd
-	double x
+	REAL x
+
+int
+ral_gdltinteger(gd, x)
+	grid *gd
+	REAL x
+
+int
+ral_gdgtinteger(gd, x)
+	grid *gd
+	REAL x
+
+int
+ral_gdleinteger(gd, x)
+	grid *gd
+	INTEGER x
+
+int
+ral_gdgeinteger(gd, x)
+	grid *gd
+	INTEGER x
+
+int
+ral_gdeqinteger(gd, x)
+	grid *gd
+	INTEGER x
+
+int
+ral_gdneinteger(gd, x)
+	grid *gd
+	INTEGER x
+
+int
+ral_gdcmpinteger(gd, x)
+	grid *gd
+	INTEGER x
 
 int
 ral_gdltgd(gd1, gd2)
@@ -562,14 +698,24 @@ ral_gdcmpgd(gd1, gd2)
 	grid *gd2
 
 int
-ral_gdminsv(gd, x)
+ral_gdminreal(gd, x)
 	grid *gd
-	double x
+	REAL x
+
+void
+ral_gdmininteger(gd, x)
+	grid *gd
+	INTEGER x
 
 int
-ral_gdmaxsv(gd, x)
+ral_gdmaxreal(gd, x)
 	grid *gd
-	double x
+	REAL x
+
+int
+ral_gdmaxinteger(gd, x)
+	grid *gd
+	INTEGER x
 
 int
 ral_gdmingd(gd1, gd2)
@@ -587,35 +733,52 @@ ral_gdcross(a, b)
 	grid *b
 
 int 
-ral_gdif_thensv(a, b, c)
+ral_gdif_then_real(a, b, c)
 	grid *a
 	grid *b
-	double c
+	REAL c
 
 int 
-ral_gdif_thenelsesv(a, b, c, d)
+ral_gdif_then_integer(a, b, c)
 	grid *a
 	grid *b
-	double c
-	double d
+	INTEGER c
 
 int 
-ral_gdif_thengd(a, b, c)
+ral_gdif_then_else_real(a, b, c, d)
+	grid *a
+	grid *b
+	REAL c
+	REAL d
+
+int 
+ral_gdif_then_else_integer(a, b, c, d)
+	grid *a
+	grid *b
+	INTEGER c
+	INTEGER d
+
+int 
+ral_gdif_then_gd(a, b, c)
 	grid *a
 	grid *b
 	grid *c
 
 int 
-ral_gdzonal_if_then(a, b, k, v, n)
+ral_gdzonal_if_then_real(a, b, k, v, n)
 	grid *a
 	grid *b
-	int *k
-	double *v
+	INTEGER *k
+	REAL *v
 	int n
 
 int 
-ral_gdbinary(gd)
-	grid *gd
+ral_gdzonal_if_then_integer(a, b, k, v, n)
+	grid *a
+	grid *b
+	INTEGER *k
+	INTEGER *v
+	int n
 
 int 
 ral_gdapplytempl(gd, templ, new_val)
@@ -630,7 +793,7 @@ ral_gdmap(gd, s, d, n)
 	int *d
 	int n
 
-double 
+REAL 
 _gdzonesize(gd, i, j)
 	grid *gd
 	int i
@@ -648,7 +811,7 @@ ral_gdborders(gd)
 	grid *gd
 
 grid *
-ral_gdborders2(gd)
+ral_gdborders_recursive(gd)
 	grid *gd
 
 grid *
@@ -661,17 +824,28 @@ ral_gdconnect(gd)
 	grid *gd
 
 int
-ral_gdnrareas(gd,connectivity)
+ral_gdnumber_of_areas(gd,connectivity)
 	grid *gd
 	int connectivity
 
 grid *
-ral_gdclip(gd, i1, j1, i2, j2)
+_ral_gdclip(gd, i1, j1, i2, j2)
 	grid *gd
 	int i1
 	int j1
 	int i2
 	int j2
+	CODE:
+	{
+		window w;
+		w.up_left.i = i1;
+		w.up_left.j = j1;
+		w.down_right.i = i2;
+		w.down_right.j = j2;
+		RETVAL = ral_gdclip(gd, w);
+	}
+  OUTPUT:
+    RETVAL
 
 grid *
 ral_gdjoin(g1, g2)
@@ -700,45 +874,253 @@ ral_gd2a(gd, outfile)
 	grid *gd
 	char *outfile
 
-int 
-ral_gdline(gd, i1, j1, i2, j2, pen)
+int
+_ral_gdline(gd, i1, j1, i2, j2, pen_integer, pen_real)
 	grid *gd
 	int i1
 	int j1
 	int i2
 	int j2
-	double pen
+	INTEGER pen_integer
+	REAL pen_real
+	CODE:
+	{	
+		cell c1 = {i1, j1};
+		cell c2 = {i2, j2};
+		ral_gdline(gd, c1, c2, pen_integer, pen_real);
+		RETVAL = 1;
+  	}
+  OUTPUT:
+    RETVAL
 
 int 
-ral_gdfilledrect(gd, i1, j1, i2, j2, pen)
+_ral_gdfilledrect(gd, i1, j1, i2, j2, pen_integer, pen_real)
 	grid *gd
 	int i1
 	int j1
 	int i2
 	int j2
-	double pen
+	INTEGER pen_integer
+	REAL pen_real
+	CODE:
+	{	
+		cell c1 = {i1, j1};
+		cell c2 = {i2, j2};
+		ral_gdfilledrect(gd, c1, c2, pen_integer, pen_real);
+		RETVAL = 1;
+  	}
+  OUTPUT:
+    RETVAL
 
-void
-ral_gdfilledcircle(gd, i, j, r, r2, pen)
+int 
+_ral_gdfilledcircle(gd, i, j, r, r2, pen_integer, pen_real)
 	grid *gd
 	int i
 	int j
 	int r
 	int r2
-	double pen
+	INTEGER pen_integer
+	REAL pen_real
+	CODE:
+	{	
+		cell c = {i, j};
+		ral_gdfilledcircle(gd, c, r, r2, pen_integer, pen_real);
+		RETVAL = 1;
+  	}
+  OUTPUT:
+    RETVAL
 
-int 
-_gdfloodfill(gd, i, j, icolor, rcolor, connectivity)
+AV *
+ral_gdget_line(gd, i1, j1, i2, j2)
+	grid *gd
+	int i1
+	int j1
+	int i2
+	int j2
+	CODE:
+	{
+		static char *fct = "Raster.xs";
+		AV *av;
+		cell *cells = NULL;
+		INTEGER *ivalue = NULL;
+		REAL *rvalue = NULL;
+		cell c1 = {i1, j1};
+		cell c2 = {i2, j2};
+		ASSERTM(av = newAV(), ERRSTR_OOM);
+		switch (gd->datatype) {
+		case INTEGER_GRID: {
+			int size;
+			if (ral_igdget_line(gd, c1, c2, &cells, &ivalue, &size)) {
+				int i;
+				for (i=0; i<size; i++) {
+					SV *sv;
+					ASSERTM(sv = newSViv(cells[i].i),ERRSTR_OOM);
+					av_push(av, sv);
+					ASSERTM(sv = newSViv(cells[i].j),ERRSTR_OOM);
+					av_push(av, sv);
+					ASSERTM(sv = newSViv(ivalue[i]),ERRSTR_OOM);
+					av_push(av, sv);
+				}
+			}
+		}
+		break;
+		case REAL_GRID: {			
+			int size;
+			if (ral_rgdget_line(gd, c1, c2, &cells, &rvalue, &size)) {
+				int i;
+				for (i=0; i<size; i++) {
+					SV *sv;
+					ASSERTM(sv = newSViv(cells[i].i),ERRSTR_OOM);
+					av_push(av, sv);
+					ASSERTM(sv = newSViv(cells[i].j),ERRSTR_OOM);
+					av_push(av, sv);
+					ASSERTM(sv = newSVnv(rvalue[i]),ERRSTR_OOM);
+					av_push(av, sv);
+				}
+			}
+		}
+		}
+	fail:
+		if (cells) free(cells);
+		if (ivalue) free(ivalue);
+		if (rvalue) free(rvalue);
+		RETVAL = av;
+  	}
+  OUTPUT:
+    RETVAL
+
+AV *
+ral_gdget_rect(gd, i1, j1, i2, j2)
+	grid *gd
+	int i1
+	int j1
+	int i2
+	int j2
+	CODE:
+	{
+		static char *fct = "Raster.xs";
+		AV *av;
+		cell *cells = NULL;
+		INTEGER *ivalue = NULL;
+		REAL *rvalue = NULL;
+		cell c1 = {i1, j1};
+		cell c2 = {i2, j2};
+		ASSERTM(av = newAV(), ERRSTR_OOM);
+		switch (gd->datatype) {
+		case INTEGER_GRID: {
+			int size;
+			if (ral_igdget_rect(gd, c1, c2, &cells, &ivalue, &size)) {
+				int i;
+				for (i=0; i<size; i++) {
+					SV *sv;
+					ASSERTM(sv = newSViv(cells[i].i),ERRSTR_OOM);
+					av_push(av, sv);
+					ASSERTM(sv = newSViv(cells[i].j),ERRSTR_OOM);
+					av_push(av, sv);
+					ASSERTM(sv = newSViv(ivalue[i]),ERRSTR_OOM);
+					av_push(av, sv);
+				}
+			}
+		}
+		break;
+		case REAL_GRID: {			
+			int size;
+			if (ral_rgdget_rect(gd, c1, c2, &cells, &rvalue, &size)) {
+				int i;
+				for (i=0; i<size; i++) {
+					SV *sv;
+					ASSERTM(sv = newSViv(cells[i].i),ERRSTR_OOM);
+					av_push(av, sv);
+					ASSERTM(sv = newSViv(cells[i].j),ERRSTR_OOM);
+					av_push(av, sv);
+					ASSERTM(sv = newSVnv(rvalue[i]),ERRSTR_OOM);
+					av_push(av, sv);
+				}
+			}
+		}
+		}
+	fail:
+		if (cells) free(cells);
+		if (ivalue) free(ivalue);
+		if (rvalue) free(rvalue);
+		RETVAL = av;
+  	}
+  OUTPUT:
+    RETVAL
+
+AV *
+ral_gdget_circle(gd, i, j, r, r2)
 	grid *gd
 	int i
 	int j
-	int icolor
-	double rcolor
+	int r
+	int r2
+	CODE:
+	{
+		static char *fct = "Raster.xs";
+		AV *av;
+		cell *cells = NULL;
+		INTEGER *ivalue = NULL;
+		REAL *rvalue = NULL;
+		cell c;
+		c.i = i;
+		c.j = j;
+		ASSERTM(av = newAV(), ERRSTR_OOM);
+		switch (gd->datatype) {
+		case INTEGER_GRID: {
+			int size;
+			if (ral_igdget_circle(gd, c, r, r2, &cells, &ivalue, &size)) {
+				int i;
+				for (i=0; i<size; i++) {
+					SV *sv;
+					ASSERTM(sv = newSViv(cells[i].i),ERRSTR_OOM);
+					av_push(av, sv);
+					ASSERTM(sv = newSViv(cells[i].j),ERRSTR_OOM);
+					av_push(av, sv);
+					ASSERTM(sv = newSViv(ivalue[i]),ERRSTR_OOM);
+					av_push(av, sv);
+				}
+			}
+		}
+		break;
+		case REAL_GRID: {			
+			int size;
+			if (ral_rgdget_circle(gd, c, r, r2, &cells, &rvalue, &size)) {
+				int i;
+				for (i=0; i<size; i++) {
+					SV *sv;
+					ASSERTM(sv = newSViv(cells[i].i),ERRSTR_OOM);
+					av_push(av, sv);
+					ASSERTM(sv = newSViv(cells[i].j),ERRSTR_OOM);
+					av_push(av, sv);
+					ASSERTM(sv = newSVnv(rvalue[i]),ERRSTR_OOM);
+					av_push(av, sv);
+				}
+			}
+		}
+		}
+	fail:
+		if (cells) free(cells);
+		if (ivalue) free(ivalue);
+		if (rvalue) free(rvalue);
+		RETVAL = av;
+  	}
+  OUTPUT:
+    RETVAL
+
+int 
+_ral_gdfloodfill(gd, i, j, pen_integer, pen_real, connectivity)
+	grid *gd
+	int i
+	int j
+	INTEGER pen_integer
+	REAL pen_real
 	int connectivity
 	CODE:
 	{	
 		cell c = {i, j};
-		RETVAL = ral_gdfloodfill(gd, c, icolor, rcolor, connectivity);
+		ral_gdfloodfill(gd, c, pen_integer, pen_real, connectivity);
+		RETVAL = 1;
   	}
   OUTPUT:
     RETVAL
@@ -751,6 +1133,10 @@ ral_ctcreate(nc, contra, bright)
 
 int 
 ral_ctdestroy(ct)
+	color_table *ct
+
+color_table *
+ral_ctcopy(ct)
 	color_table *ct
 
 int 
@@ -860,6 +1246,22 @@ ral_HSVgd2ppm(H, S, V, outfile)
     RETVAL
 
 
+int 
+ral_RGBAgd2png(R, G, B, A, outfile)
+	grid *R
+	grid *G
+	grid *B
+	grid *A
+	char *outfile
+	CODE:
+	{	
+		fprintf(stderr,"ERROR: Netpbm is not available!\n");
+		RETVAL = 0;
+  	}
+  OUTPUT:
+    RETVAL
+
+
 #else
 
 int
@@ -897,109 +1299,15 @@ ral_HSVgd2ppm(H, S, V, outfile)
 	grid *V
 	char *outfile
 
+int 
+ral_RGBAgd2png(R, G, B, A, outfile)
+	grid *R
+	grid *G
+	grid *B
+	grid *A
+	char *outfile
+
 #endif
-
-point_data *
-ral_pointcreate(x, y, color, line_width, symbol, symbol_height, symbol_font, label, label_placement)
-	double x
-	double y
-	int color
-	int line_width
-	int symbol
-	double symbol_height
-	int symbol_font
-	char *label
-	int label_placement
-
-int 
-ral_pointdestroy(p)
-	point_data *p
-
-lseg_data *
-ral_lsegcreate(x1, y1, x2, y2, color, style, width, arrow, arrow_angle, arrow_barb, label,  label_placement)
-	double x1
-	double y1
-	double x2
-	double y2
-	int color
-	int style
-	int width
-	int arrow
-	double arrow_angle
-	double arrow_barb
-	char *label
-	int label_placement
-
-int 
-ral_lsegdestroy(lseg)
-	lseg_data *lseg
-
-polygon_data *
-ral_polygoncreate(n, x, y, color, line_style, line_width, fill_style, fill_line_angle, fill_line_sepn, fill_line_phase, label, label_placement)
-	int n
-	double *x
-	double *y
-	int color
-	int line_style
-	int line_width
-	int fill_style
-	double fill_line_angle
-	double fill_line_sepn
-	double fill_line_phase
-	char *label
-	int label_placement
-
-int 
-ral_polygondestroy(polygon)
-	polygon_data *polygon
-
-vector_data *
-ral_vdnull()
-
-vector_data *
-ral_vdcreate(name, id, label_color, label_line_width, label_font, label_height)
-	char *name
-	int id
-	int label_color
-	int label_line_width
-	int label_font
-	int label_height
-
-int 
-ral_vddestroy(vd)
-	vector_data *vd
-
-int 
-ral_vdget_id(vd)
-	vector_data *vd
-
-vector_data *
-ral_vdnext(vd)
-	vector_data *vd
-
-int 
-ral_vdbreaklist(vd)
-	vector_data *vd
-
-int 
-ral_vdaddvd(root, vd)
-	vector_data *root
-	vector_data *vd
-
-int 
-ral_vdaddpoint(vd, point)
-	vector_data *vd
-	point_data *point
-
-int 
-ral_vdaddlseg(vd, lseg)
-	vector_data *vd
-	lseg_data *lseg
-
-int 
-ral_vdaddpolygon(vd, polygon)
-	vector_data *vd
-	polygon_data *polygon
 
 #ifndef HAVE_PGPLOT
 
@@ -1034,15 +1342,15 @@ ral_gdwindow_close(window)
     RETVAL
 
 grid *
-ral_gdplot(gd, vd, device, window, ct, draw, options, default_width)
+ral_gdplot(gd, device, window, ct, draw, default_width, pap, close)
 	grid *gd
-	vector_data *vd
 	char *device
 	int window
 	color_table *ct
 	int draw
-	int options
 	int default_width
+	int pap
+	int close
 	CODE:
 	{	
 		fprintf(stderr,"ERROR: PGPLOT is not available!\n");
@@ -1071,15 +1379,15 @@ ral_gdwindow_close(window)
 	int window
 
 grid *
-ral_gdplot(gd, vd, device, window, ct, draw, options, default_width)
+ral_gdplot(gd, device, window, ct, draw, default_width, pap, close)
 	grid *gd
-	vector_data *vd
 	char *device
 	int window
 	color_table *ct
 	int draw
-	int options
 	int default_width
+	int pap
+	int close
 
 #endif
 
@@ -1088,27 +1396,54 @@ ral_gdprint(gd)
 	grid *gd
 
 AV *
-_gdprint1(gd, quiet, wc)
+_ral_gd2list(gd)
 	grid *gd
-	int quiet
-	int wc
 	CODE:
-	{	
-		double *p = NULL;
-		int i, psize = 0;
-		AV *av = newAV();
-		if (!av) goto fail;
-		if (ral_gdprint1(gd, &p, &psize, quiet, wc)) 
-		for (i=0; i<psize; i++) {
-			SV *sv = newSVnv(p[i]);
-			if (!sv) goto fail;
-			av_push(av, sv);
+	{
+		static char *fct = "Raster.xs";
+		AV *av;
+		cell *c = NULL;
+		INTEGER *ivalue = NULL;
+		REAL *rvalue = NULL;
+		ASSERTM(av = newAV(), ERRSTR_OOM);
+		switch (gd->datatype) {
+		case INTEGER_GRID: {
+			int size;
+			if (ral_igd2list(gd, &c, &ivalue, &size)) {
+				int i;
+				for (i=0; i<size; i++) {
+					SV *sv;
+					ASSERTM(sv = newSViv(c[i].i), ERRSTR_OOM);
+					av_push(av, sv);
+					ASSERTM(sv = newSViv(c[i].j), ERRSTR_OOM);
+					av_push(av, sv);
+					ASSERTM(sv = newSViv(ivalue[i]), ERRSTR_OOM);
+					av_push(av, sv);
+				}
+				
+			}
 		}
-		goto ok;
+		break;
+		case REAL_GRID: {
+			int size;
+			if (ral_rgd2list(gd, &c, &rvalue, &size)) {
+				int i;
+				for (i=0; i<size; i++) {
+					SV *sv;
+					ASSERTM(sv = newSViv(c[i].i), ERRSTR_OOM);
+					av_push(av, sv);
+					ASSERTM(sv = newSViv(c[i].j), ERRSTR_OOM);
+					av_push(av, sv);
+					ASSERTM(sv = newSVnv(rvalue[i]), ERRSTR_OOM);
+					av_push(av, sv);
+				}
+			}
+		}
+		}
 	fail:
-		fprintf(stderr,"Out of memory!\n");
-	ok:
-		if (p) free(p);
+		if (c) free(c);
+		if (ivalue) free(ivalue);
+		if (rvalue) free(rvalue);
 		RETVAL = av;
   	}
   OUTPUT:
@@ -1121,21 +1456,18 @@ _gdhistogram(gd, bin, n)
 	int n
 	CODE:
 	{
+		static char *fct = "Raster.xs";
 		int i, *c = NULL;
-		AV *counts = newAV();
-		if (!counts) goto fail;
-		c = (int *)calloc(n+1,sizeof(int));
-		if (!c) goto fail;
-		if (ral_gdhistogram(gd, bin, c, n))
+		AV *counts;
+		ASSERTM(counts = newAV(), ERRSTR_OOM);
+		ASSERTM(c = (int *)calloc(n+1,sizeof(int)), ERRSTR_OOM);
+		ral_gdhistogram(gd, bin, c, n);
 		for (i=0; i<n+1; i++) {
-			SV *sv = newSViv(c[i]);
-			if (!sv) goto fail;
+			SV *sv;
+			ASSERTM(sv = newSViv(c[i]), ERRSTR_OOM);
 			av_push(counts, sv);
 		}
-		goto ok;
 	fail:
-		fprintf(stderr,"Out of memory!\n");
-	ok:
 		if (c) free(c);
 		RETVAL = counts;
 	}
@@ -1147,30 +1479,28 @@ _gdcontents(gd)
 	grid *gd
 	CODE:
 	{
-		hash table;
+		static char *fct = "Raster.xs";
+		hash table = {0, NULL};
 		int i;
-		HV* h = newHV();
-		if (!h) goto fail;
-		if (!ral_hash_create(&table, 200)) goto ok;
+		HV* h;
+		ASSERTM(h = newHV(), ERRSTR_OOM);
+		ASSERT(ral_hash_create(&table, 200));
 		if (ral_gdcontents(gd, &table))
 		for (i = 0; i < table.size; i++) {
 			hash_int_item *a = (hash_int_item *)table.table[i];
 			while (a) {
 				U32 klen;
 				char key[10];
-				SV *sv = newSViv(a->value);
-				if (!sv) goto fail;
+				SV *sv;
+				ASSERTM(sv = newSViv(a->value), ERRSTR_OOM);
 				snprintf(key, 10, "%i", a->key);
 				klen = strlen(key);
 				hv_store(h, key, klen, sv, 0);
 				a = a->next;
 			}
 		}
-		ral_hash_destroy(&table);
-		goto ok;
 	fail:
-		fprintf(stderr,"Out of memory!\n");
-	ok:
+		ral_hash_destroy(&table);
 		RETVAL = h;
 	}
   OUTPUT:
@@ -1183,7 +1513,7 @@ _gdzonalcount(gd, zones)
 	CODE:
 	{
 		hash table;
-		int i, n = 0;
+		int i;
 		HV* h = newHV();
 		if (!h) goto fail;
 		if (!ral_hash_create(&table, 200)) goto ok;
@@ -1218,7 +1548,7 @@ _gdzonalsum(gd, zones)
 	CODE:
 	{
 		hash table;
-		int i, n = 0;
+		int i;
 		HV* h = newHV();
 		if (!h) goto fail;
 		if (!ral_hash_create(&table, 200)) goto ok;
@@ -1253,7 +1583,7 @@ _gdzonalmin(gd, zones)
 	CODE:
 	{
 		hash table;
-		int i, n = 0;
+		int i;
 		HV* h = newHV();
 		if (!h) goto fail;
 		if (!ral_hash_create(&table, 200)) goto ok;
@@ -1288,7 +1618,7 @@ _gdzonalmax(gd, zones)
 	CODE:
 	{
 		hash table;
-		int i, n = 0;
+		int i;
 		HV* h = newHV();
 		if (!h) goto fail;
 		if (!ral_hash_create(&table, 200)) goto ok;
@@ -1323,7 +1653,7 @@ _gdzonalmean(gd, zones)
 	CODE:
 	{
 		hash table;
-		int i, n = 0;
+		int i;
 		HV* h = newHV();
 		if (!h) goto fail;
 		if (!ral_hash_create(&table, 200)) goto ok;
@@ -1358,7 +1688,7 @@ _gdzonalvariance(gd, zones)
 	CODE:
 	{
 		hash table;
-		int i, n = 0;
+		int i;
 		HV* h = newHV();
 		if (!h) goto fail;
 		if (!ral_hash_create(&table, 200)) goto ok;
@@ -1398,7 +1728,7 @@ _gdneighbors(gd)
 	CODE:
 	{
 		hash **b;
-		int *c, i, j, n;
+		int *c, i, n;
 		HV* h = newHV();
 		if (!h) goto fail;
 		if (!ral_gdneighbors(gd, &b, &c, &n)) goto fail;
@@ -1516,6 +1846,19 @@ _gdzones(gd, z)
 		if (c) free(c);
 		if (k) free(k);
 		RETVAL = hv;
+	}
+  OUTPUT:
+    RETVAL
+
+grid *
+_ral_dijkstra(w, ci, cj)
+	grid *w
+	int ci
+	int cj
+	CODE:
+	{
+		cell c = {ci, cj};
+		RETVAL = ral_dijkstra(w, c);
 	}
   OUTPUT:
     RETVAL

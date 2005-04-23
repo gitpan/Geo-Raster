@@ -106,3 +106,7 @@ Revision history for Perl extension Geo::RasterAlgebra, formerly (Grid).
 0.21 released
 	- better detection of libral location
 	- test functions have_netpbm and have_pgplot
+0.3 released Mar 16 2005
+	- lots of tests and bug fixes
+0.31 relesed Apr 23 2005
+	- improving the 0.3
