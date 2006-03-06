@@ -6,14 +6,20 @@ use Carp;
 use FileHandle;
 use Statistics::Descriptive; # used in zonalfct
 use Config; # for byteorder
+use gdalconst;
+use gdal;
+
 use vars qw(@ISA @EXPORT %EXPORT_TAGS @EXPORT_OK $AUTOLOAD 
-	    $VERSION $BYTE_ORDER $dbh $INTEGER_GRID $REAL_GRID);
+	    $VERSION $BYTE_ORDER $INTEGER_GRID $REAL_GRID
+	    %COLOR_SCHEMES);
 
-$VERSION = '0.31'; # depends on libral 0.31
+$VERSION = '0.42';
 
-# TODO: make these constants:
+# TODO: make these constants derived from libral:
 $INTEGER_GRID = 1;
 $REAL_GRID = 2;
+
+%COLOR_SCHEMES = (Grayscale => 0, Rainbow => 1, Colortable => 2);
 
 require Exporter;
 require DynaLoader;
@@ -30,15 +36,6 @@ use AutoLoader 'AUTOLOAD';
 		  &not &and &or
 		  &db_connect &db_close &sql &db_initvd );
 
-use vars qw(%recognized_extensions);
-
-%recognized_extensions = (asc=>'Arc/Info ascii',
-			  e=>'Arc/Info interchange',
-			  ppm=>'ppm',
-			  jpeg=>'ppmtojpeg',
-			  jpg=>'ppmtojpeg',
-			  png=>'pnmtopng');
-
 sub dl_load_flags {0x01}
 
 bootstrap Geo::Raster $VERSION;
@@ -49,6 +46,7 @@ bootstrap Geo::Raster $VERSION;
 
 use overload ('fallback' => undef,
 	      'bool'     => 'bool',
+	      '""'       => 'stringify',
 	      '='        => 'clone',
 	      'neg'      => 'neg',
 	      '+'        => 'plus',
@@ -98,10 +96,18 @@ or
 
 Geo::Raster is an object-oriented interface to libral, a C library for
 rasters and raster algebra. Geo::Raster makes using libral easy and
-adds some very useful functionality to it.
+adds some very useful functionality to it. libral rasters are
+in-memory for fast and easy processing. libral rasters can be created
+from GDAL rasters. GDAL provides access to rasters in many formats.
 
-Each cell in raster/grid is assumed to be a square. The grid point
-represents the center of the cell.
+Geo::Raster also adds the required functionality to display rasters in
+Gtk2::Ex::Geo.
+
+Each cell in raster/grid is assumed to be a square. 
+
+The grid point represents the center of the cell and not the area of
+the cell (when such distinction needs to be made). TODO: This needs
+more attention.
 
 A grid is indexed like this:
 
@@ -137,35 +143,27 @@ in specified order named parameters.
 
 To start with opening a previously saved grid:
 
-    $gd = new Geo::Raster(filename=>"data/dem");
+    $gd = new Geo::Raster(filename=>"data/dem", load=>1);
 
 or simply
 
     $gd = new Geo::Raster("data/dem");
 
-The default format for grids is a pair of [bil|dem]/hdr files. The
-extension of the binary file can be set using named parameter
-ext. Currently only one-channel 8, 16, or 32 bit images can be read. 8
-and 16 bit images are loaded as integer grids and 32 bit images as
-real grids. The datatype of the grid can be specified using named
-parameter datatype. byte images are by default read into integer
-grids. If a hdr file is not found the method attempts to read a pair
-of img/doc (Idrisi (c)) files. NOTE 1: in hdr files ULXMAP and ULYMAP
-denote the x,y of the center point of the upper left pixel. NOTE 2: in
-hdr files BYTEORDER may be I (intel, little-endian) or M (motorola,
-big-endian). (http://downloads.esri.com/support/whitepapers/other_/eximgac.pdf)
+A Geo::Raster object maintains internally a gdal object. To get data
+from the gdal object into the grid, use the load option (load is not
+assumed if only filename is given) or cache method (see below).
 
 To start with a new grid:
 
-    $gd = new Geo::Raster(datatype=>datatype_string,M=>100,N=>100);
+    $gd = new Geo::Raster(datatype=>datatype_string, M=>100, N=>100);
 
 or simply
 
-    $gd = new Geo::Raster(1,100,100);
+    $gd = new Geo::Raster(1, 100, 100);
 
 or even more simply
 
-    $gd = new Geo::Raster(100,100);
+    $gd = new Geo::Raster(100, 100);
 
 $datatype is optional, the default is 'integer', 'real' is another
 possibility (actual types of integer and real are defined in
@@ -190,406 +188,225 @@ In both copy methods the datatype of the result is the same as in the
 original grid. Use named parameter datatype to upgrade an integer grid
 to a real grid or downgrade a real grid to an integer grid.
 
-You can also import data:
-
-    $gd = new Geo::Raster(filename=>$filename, import=>$format);
-
-or simply
-
-    $gd = new Geo::Raster("image.ppm");
-
-$format may currently be "Arc/Info ascii export", "Arc/Info
-interchange" or "ppm".  Arc/Info interchange format may contain other
-information besides the grid, this is printed out if the option
-print_header is set. Currently the number of columns in the grid as
-specified by the interchange file is increased by 3 - why it must do
-this is unexplained. Datatype may also be set while importing. When
-importing ppm images you can specify option "channel" as "red",
-"green", or "blue", the default is to use the luminance value.
-
-Importing is launched if the filename of the grid to be opened has
-a recognized extension.
-
 =cut
-
-sub _set_attr {
-    my $self = shift;
-    $self->{M} = ral_gdget_height($self->{GRID});
-    $self->{N} = ral_gdget_width($self->{GRID});
-    $self->{DATATYPE} = ral_gdget_datatype($self->{GRID});
-}
 
 sub _new_grid {
     my $self = shift;
     my $grid = shift;
     return unless $grid;
-    ral_gddestroy($self->{GRID});
+    ral_gddestroy($self->{GRID}) if $self->{GRID};
     $self->{GRID} = $grid;
-    $self->_set_attr;
+    attributes($self);
 }
 
 sub interpret_datatype {
     return 0 unless $_[0];
-    return $INTEGER_GRID if $_[0] == $INTEGER_GRID;
-    return $REAL_GRID if $_[0] == $REAL_GRID;
     return $INTEGER_GRID if $_[0] =~  m/^int/i;
     return $REAL_GRID if $_[0] =~ m/^real/i;
     return $REAL_GRID if $_[0] =~ m/^float/i;
+    return $INTEGER_GRID if $_[0] == $INTEGER_GRID;
+    return $REAL_GRID if $_[0] == $REAL_GRID;
     croak "invalid datatype: '$_[0]'";
     return -1;
-}
-
-sub copy_attributes {
-    ($a,$b) = @_;
-    my %no = (#not these
-	      GRID=>1,DATATYPE=>1,TABLE=>1,
-	      # colortable is done below
-	      COLOR_TABLE=>1,RGBI=>1,IRGB=>1,
-	      # these are the job of attrib
-	      M=>1,N=>1,UNIT_LENGTH=>1,MINX=>1,MAXX=>1,MINY=>1,MAXY=>1);
-    for my $key (keys %{$a}) {
-	next if $no{$key};
-	$b->{$key} = $a->{$key};
-    }
-    $b->{COLOR_TABLE} = ral_ctcopy($a->{COLOR_TABLE});
 }
 
 sub new {
     my $class = shift;
     my $self = {};
-    $self->{COLOR_TABLE} = ral_ctcreate(0, 0, 0);
 
-    if (ref($_[0]) eq 'gridPtr') {
+    if (@_ == 1 and ref($_[0]) eq 'ral_gridPtr') {
+	
+	$self->{GRID} = $_[0];
 
-	$self->{GRID} = ral_gdnewcopy($_[0], interpret_datatype($_[1]));
-	# remember to call copy_attributes if you use this constructor
+    } elsif (@_ == 1 and ref($_[0]) eq 'Geo::Raster') {
+	
+	$self->{GRID} = ral_gdnewcopy($_[0]->{GRID}, 0);
+	
+    } elsif (@_ == 1) {
+	
+	my $name = shift;
+	
+	croak "use of undefined value as name in Geo::Raster->new" unless defined $name;
 
-    } elsif (ref($_[0]) eq 'Geo::Raster') {
+	$self->{NAME} = $name;
+	
+	gdal_open($self);
 
-	$self->{GRID} = ral_gdnewcopy($_[0]->{GRID}, interpret_datatype($_[1]));
-	copy_attributes($_[0],$self);
+    } elsif (@_ == 2 and ($_[0] =~ /\d+/) and ($_[1] =~ /\d+/)) {
 
-    } elsif ($#_ == 0) {
+	my $M = shift;
+	my $N = shift;
 
-	croak "use of undefined value as constructor parameter in Geo::Raster" unless defined $_[0];
+	$self->{GRID} = ral_gdnew($INTEGER_GRID, $M, $N);
 
-	$self->{NAME} = $_[0];
-	my $ext = '';
-	$ext = $1 if $_[0] =~ /\.(\w+)$/;
+    } elsif (@_ == 3) {
 
-	if ($recognized_extensions{$ext}) {
-	    return unless _import($self, filename=>$_[0], datatype=>$REAL_GRID);
-	} else {
-	    return unless _open($self, filename=>$_[0]);
-	}
+	my $datatype = shift;
+	my $M = shift;
+	my $N = shift;
 
-    } elsif ($#_ == 1 and ($_[0] =~ /\d+/) and ($_[1] =~ /\d+/)) {
-
-	$self->{GRID} = ral_gdnew($INTEGER_GRID, $_[0], $_[1]);
-
-    } elsif ($#_ == 2) {
-
-	$self->{GRID} = ral_gdnew(interpret_datatype($_[0]), $_[1], $_[2]);
+	$self->{GRID} = ral_gdnew(interpret_datatype($datatype), $M, $N);
 
     }
 
-    my(%opt) = @_ unless $self->{GRID}; # using named arguments
+    my %opt = @_ if @_ and not $self->{GRID}; # using named arguments
 
-    $opt{datatype} = interpret_datatype($opt{datatype});
+    $opt{datatype} = $opt{datatype} ? interpret_datatype($opt{datatype}) : 0;
 
-    if (exists $opt{copy}) { # 
+    if ($opt{copy} and ref($opt{copy}) eq 'Geo::Raster') {
 
-	if (ref($opt{copy}) eq 'Geo::Raster') {
-	    $self->{GRID} = ral_gdnewcopy($opt{copy}->{GRID}, $opt{datatype});
-	    copy_attributes($opt{copy},$self);
-	} else {
-	    croak "can make copies only of Geo::Rasters";
-	}
+	$self->{GRID} = ral_gdnewcopy($opt{copy}->{GRID}, $opt{datatype});
+
+    } elsif ($opt{use} and ref($opt{use}) eq 'ral_gridPtr') {
 	
-
-    } elsif (exists $opt{like}) {
+	$self->{GRID} = $opt{use};
+	
+    } elsif ($opt{like}) {
 
 	$self->{GRID} = ral_gdnewlike($opt{like}->{GRID}, $opt{datatype});
 
-    }
-
-    if ($opt{filename}) {
+    } elsif ($opt{filename}) {
 
 	$self->{NAME} = $opt{filename};
-	my $ext;
-	$ext = $1 if $opt{filename} =~ /\.(\w+)$/;
-	if ($opt{import} or $recognized_extensions{$ext}) {
-	    return unless _import($self, %opt);
-	} else {
-	    return unless _open($self, %opt);
-	}
+
+	gdal_open($self, %opt);
 
     } elsif ($opt{M} and $opt{N}) {
+
+	$opt{datatype} = $INTEGER_GRID unless $opt{datatype};
 
 	$self->{GRID} = ral_gdnew($opt{datatype}, $opt{M}, $opt{N});
        
     }
-    return unless $self->{GRID};
-    _set_attr($self);
-    attributes($self);
+    attributes($self) if $self->{GRID};
     bless($self, $class);
 }
 
-
-sub _open {
-    my($self,%opt) = @_;
-    my $fn = $opt{filename};
-    $fn =~ s/\.(\w+)$//;
-    my $hdr = "$fn.hdr";
-    $hdr = "$fn.HDR" unless -e $hdr;
-    croak "header file $fn.hdr or $fn.HDR not found" unless -e $hdr;
-    my %hdr;
-    my $fh = new FileHandle;
-    croak "can't open $hdr: $!\n" unless $fh->open($hdr);
-    my $line;
-    while ($line = <$fh>) {
-	chomp $line;
-	$line =~ s/\r//;
-	my($key, $value) = split /\s+/, $line;
-	$hdr{uc($key)} = uc($value);
-    }		
-    $fh->close;
-    croak "$hdr{LAYOUT}: unsupported layout\n" unless $hdr{LAYOUT} eq 'BIL';
-    croak "$hdr{NBANDS}: too many bands\n" unless $hdr{NBANDS} == 1;
-    
-    my $datatype = $INTEGER_GRID;  # an integer
-    
-    my $byteorder = $hdr{BYTEORDER} =~ /^m/i ? 4321 : 1234; # big-endian, motorola ; or little-endian, intel 
-    
-# leave for backwards compatibility
-    $datatype = $REAL_GRID if $hdr{BYTEORDER} =~ /^f/i; # undocumented tweak of format...
-
-    my $el_type;
-    
-#define OneByteSignedInt 1
-#define TwoByteSignedInt 2
-#define FourByteSignedInt 3
-#define FourByteReal 4
-#define EigthByteReal 5
-    
-    if ($hdr{NBITS}/8 == 1) {
-	$datatype = $INTEGER_GRID;
-	$el_type = 1;
-    } elsif ($hdr{NBITS}/8 == 2) {
-	$datatype = $INTEGER_GRID;
-	$el_type = 2;
-    } elsif ($hdr{NBITS}/8 == 4) {
-	# this is the same as in GDAL
-	$datatype = $REAL_GRID;
-	$el_type = 4;
-    } elsif ($hdr{NBITS}/8 == 2) {
-	$datatype = $REAL_GRID;
-	$el_type = 5;
-    } else {
-	die "not supported NBITS: $hdr{NBITS}\n";
+sub gdal_open {
+    my($self, %opt) = @_;
+    my $dataset = gdal::Open($self->{NAME});
+    my $t = $dataset->GetGeoTransform;
+    unless ($t) {
+	@$t = (0,1,0,0,0,1);
     }
+    $t->[5] = abs($t->[5]);
+    croak "cells are not squares: dx=$t->[1] != dy=$t->[5]" 
+	unless $t->[1] == $t->[5];
+    croak "the raster is not a strict north up image"
+	unless $t->[2] == $t->[4] and $t->[2] == 0;
+    my @world = ($t->[0], $t->[3]-$dataset->{RasterYSize}*$t->[1],
+		 $t->[0]+$dataset->{RasterXSize}*$t->[1], $t->[3]);
+    my $band = $opt{BAND} || 1;
 
-    $datatype = $opt{datatype} if $opt{datatype};
-    
-    $self->{GRID} = ral_gdnew($datatype, $hdr{NROWS}, $hdr{NCOLS});
+    $self->{GDAL}->{dataset} = $dataset;
+    $self->{GDAL}->{world} = [@world];
+    $self->{GDAL}->{cell_size} = $t->[1];
+    $self->{GDAL}->{band} = $band;
 
-    $self->{DATATYPE} = $datatype;
-    
-    if ($hdr{XDIM} and $hdr{YDIM}) {
-	croak "not a uniform grid\n" unless $hdr{XDIM} == $hdr{YDIM};
-	ral_gdset_bounds_unx($self->{GRID}, $hdr{XDIM}, $hdr{ULXMAP}-$hdr{XDIM}/2, $hdr{ULYMAP}+$hdr{XDIM}/2)
-	    if $hdr{ULXMAP} and $hdr{ULYMAP};
-    }
-    
-    my $ext;
-    if ($opt{ext}) {
-	$ext = $opt{ext};
-    } else {
-	for ('.bil','.BIL','.dem','.DEM','.img','.IMG') {
-	    $ext = $_ if -e "$fn$_";
-	}
-    }
-    croak "image file not found, tried $fn.bil, $fn.BIL, $fn.dem, $fn.DEM, $fn.img, and $fn.IMG\n" unless $ext;
-    
-    # this reads into given type if supported $hdr{NBITS}/8
-    
-    return unless ral_gdread($self->{GRID}, $fn.$ext, $el_type, $byteorder);
-
-    # color table
-
-    for $ext ('.clr','.CLR') {
-	if (-f $fn.$ext) {
-	    load_colors($self,$fn.$ext);
-	}
-    }
-
-    # data table
-
-    for $ext ('.dat','.DAT') {
-	if (-f $fn.$ext) {
-	    load_table($self,$fn.$ext);
-	}
-    }
-    
+    cache($self) if $opt{load};
     return 1;
 }
 
-sub load_colors {
-    my($self,$filename) = @_;
-    my $fh = new FileHandle;
-    croak "can't open $filename: $!\n" unless $fh->open($filename);
-    colortable($self);
-    my $line;
-    while ($line = <$fh>) {
-	chomp $line;
-	$line =~ s/\r//;
-	my @l = split /\s+/, $line;
-	next unless @l >= 4;
-	color($self,@l);
-    }		
-    $fh->close;
+sub _min {
+    return $_[0] if $_[0] < $_[1];
+    return $_[1];
 }
 
-sub load_table {
-    my($self,$filename) = @_;
-    my $fh = new FileHandle;
-    croak "can't open $filename: $!\n" unless $fh->open($filename);
-    my $f = 1;
-    my $line;
-    while ($line = <$fh>) {
-	chomp $line;
-	$line =~ s/\r//;
-	my @l = split /\t/, $line;
-	my $key = $l[0];
-	if ($f) {
-	    $self->{TABLE}->{HEADER} = [@l];
-	    $f = 0;
-	} else {
-	    $self->{TABLE}->{DATA}->[$key] = [@l];
-	}
-    }
-    $fh->close;
+sub _max {
+    return $_[0] if $_[0] > $_[1];
+    return $_[1];
 }
 
+=pod
 
-sub _import {
-    my($self,%opt) = @_;
-    my $fn = $opt{filename};
-    my $ext;
-    $ext = $1 if $fn =~ /\.(\w+)$/;
+=head2 Caching data into the work raster from the dataset
 
-    if ($ext eq 'asc' or ($opt{import} =~ /arc\/info/i and $opt{import} =~ /asc/)) {
+Read all data:
 
-	my $fh = new FileHandle;
-	croak "can't open $fn: $!\n" unless $fh->open($fn);
-	my @p; # N M minX minY unit_length
-	my $i;
-	for $i (0..4) {
-	    $_ = <$fh>;
-	    chomp;
-	    (undef, $p[$i]) = split /\s+/;
-	}		
-	$fh->close;
-	$self->{GRID} = ral_a2gd($opt{datatype}, $p[1], $p[0], $fn, 1);
-	if ($self->{GRID}) {
-	    # arc/info xllmin is the same as our minX:
-	    ral_gdset_bounds_unn($self->{GRID}, $p[4], $p[2], $p[3]);
-	}
-	
-    } elsif ($ext eq 'e' or ($opt{import} =~ /arc\/info/i and $opt{import} =~ /interc/)) {
-	
-	my $fh = new FileHandle;
-	croak "can't open $fn: $!\n" unless $fh->open($fn);
-	my($M, $N, $x, $y);
-	my($unit_length, $minX, $minY, $maxX, $maxY);
-	my $i = 0;
-	my $data = 0;
-	my $grid = 0;
-	while (<$fh>) {
-	    $data = 0 if /^EOG/;
-	    next if $data;
-	    $_ =~ s/\s+$//;
-	    if ($grid) {
-		$i++;
-		my $tmp;
-		(undef, $x, $y, $tmp) = split /\s+/;
-		if ($i == 1) {
-		    $N = $x;
-		    $M = $y;
-		    print "M=$M, N=$N\n" if $opt{debug};
-		    if ($opt{print_header}) {
-			print "... BTW: I don't know what $tmp means in the grid header\n";
-			print "... skipping the grid header and data\n";
-		    }
-		} elsif ($i == 2) {
-		    if ($x != $y) {
-			print "ERROR: not square cells\n";
-			return;
-		    }
-		    $unit_length = $x*1.0;
-		    print "unit_length=$unit_length\n" if $opt{debug};
-		} elsif ($i == 3) {
-		    $minX = $x*1.0;
-		    $minY = $y*1.0;
-		    print "minX=$minX, minY=$minY\n" if $opt{debug};
-		} elsif ($i == 4) {
-		    $maxX = $x*1.0;
-		    $maxY = $y*1.0;
-		    $x = $minX + $N*$unit_length;
-		    $y = $minY + $M*$unit_length;
-		    if (abs($x - $maxX) > 0.0001) {
-			print STDERR "WARNING: input file says maxX is $maxX but will use $x\n";
-		    }
-		    if (abs($y - $maxY) > 0.0001) {
-			print STDERR "WARNING: input file says maxY is $maxY but will use $y\n";
-		    }
-		} else {
-		    $data = 1;
-		    $grid = 0;
-		}
-		next;
+    $gd->cache();
+
+Use an existing raster as a model (bounding box, cell_size):
+
+    $gd->cache($like_this_grid); 
+
+Use a bounding box:
+
+    $gd->cache($minX,$minY,$maxX,$maxY);
+    $gd->cache($minX,$minY,$maxX,$maxY,$cell_size);
+
+If the cell_size is not given, the cell_size of the dataset is used.
+
+If the cell_size is specified, it is used if it is larger than the
+cell_size of the dataset.
+
+The given bounding box clipped to the bounding box of the dataset. The
+resulting bounding box of the work raster is always adjusted to pixel
+boundaries of the dataset.
+
+=cut
+
+sub cache {
+    my $self = shift;
+
+    my $gdal = $self->{GDAL};
+
+    croak "no GDAL" unless $gdal;
+    
+    my $clip = $gdal->{world};
+    my $cell_size = $gdal->{cell_size};
+
+    if (defined $_[0]) {
+
+	if (@_ == 1) { # use the given grid as a model
+
+	    croak "usage: cache(\$grid)" unless ref($_[0]) eq 'Geo::Raster';
+
+	    if ($_[0]->{GDAL}) {
+		$clip = $_[0]->{GDAL}->{world};
+		$cell_size = $_[0]->{GDAL}->{cell_size};
+	    } else {
+		$clip = ral_gdget_world($_[0]->{GRID}); 
+		$cell_size = ral_gdget_cell_size($_[0]->{GRID});
 	    }
-	    print $_,"\n" if !/^~/ and $opt{print_header};
-	    $grid = 1 if /^GRD/;
-	}
-	$fh->close;
-	$N += 3; # WHAT THE *!% IS THIS !!!
-	$self->{GRID} = ral_a2gd($opt{datatype}, $M, $N, $fn, 2);
-	if ($self->{GRID}) {
-	    # arc/info xllmin is the same as our minX:
-	    ral_gdset_bounds_unn($self->{GRID}, $unit_length, $minX, $minY);
-	}
-	
-    } elsif ($ext eq 'ppm' or $opt{import} =~ /ppm/i) {
-	
-	$opt{channel} = 'luminance' if !$opt{channel};
-	if ($opt{channel} eq 'red') {
-	    $opt{channel} = 1;
-	} elsif ($opt{channel} eq 'green') {
-	    $opt{channel} = 2;
-	} elsif ($opt{channel} eq 'blue') {
-	    $opt{channel} = 3;
+
 	} else {
-	    $opt{channel} = 0;
+
+	    $clip = [@_[0..3]];
+	    if ($clip->[1] > $clip->[3]) { # cope with ul,dr
+		my $tmp = $clip->[3];
+		$clip->[3] = $clip->[1];
+		$clip->[1] = $tmp;
+	    }
+	    $cell_size = $_[4] if defined($_[4]) and $_[4] > $cell_size;
+
 	}
-	$self->{GRID} = ral_ppm2gd($opt{datatype}, $fn, $opt{channel});
+
+    }
+
+    my $gd = ral_gdread_using_GDAL($gdal->{dataset},$gdal->{band},@$clip,$cell_size);
+
+    return unless $gd;
+   
+    if (defined wantarray) {
+
+	$gd = new Geo::Raster $gd;
+	return $gd;
 
     } else {
-	
-	croak "new Geo::Raster: $opt{import}: import method not supported";
+
+	ral_gddestroy($self->{GRID}) if $self->{GRID};
+	delete $self->{GRID};
+	$self->{GRID} = $gd;
+	attributes($self);
 	
     }
-    return 1;
 }
-
 
 sub DESTROY {
     my $self = shift;
     return unless $self;
     ral_gddestroy($self->{GRID}) if $self->{GRID};
     delete($self->{GRID});
-    ral_ctdestroy($self->{COLOR_TABLE}) if $self->{COLOR_TABLE};
-    delete($self->{COLOR_TABLE});
 }
 
 
@@ -602,37 +419,7 @@ sub DESTROY {
 If no filename is given the method tries to use the name attribute of
 the grid.
 
-The default saving format is a pair of hdr/bil files but see below.
-
-Exporting a grid:
-
-    $gd->save(filename=>$filename, export=>$method, options=>$options);
-
-or simply
-
-    $gd->save("grid.ppm");
-
-Currently only "arc/info ascii" and "ppm" have built-in native support
-for exporting. Filename is optional. The default filename is the name
-of the grid. The name of the grid is set if the grid is initialized
-from a disk file or it can be set using the method set_name. This
-method also sets the name attribute.
-
-NOTE: ppm export uses the colortable if one exists, otherwise all
-channels (r,g,b) are set to the cell value. Cell values are forced to
-the integer range 0..PPM_MAXMAXVAL. PPM_MAXMAXVAL is platform
-dependent, in my Intel Linux it is 1023.
-
-If a recognized extension is detected in the filename or in the name
-of the grid then that will be used as the export method. Recognized
-extensions are:
-
-asc for arc/info ascii
-ppm
-jpeg and jpg (needs ppmtojpeg program)
-png (needs pnmtopng program)
-
-Options for ppmto... programs can be given as the options argument.
+The default saving format is a pair of hdr/bil files.
 
 =cut
 
@@ -650,57 +437,20 @@ sub save {
     my $ext;
     $ext = $1 if $name =~ /\.(\w+)$/;
     $ext = '' unless defined $ext;
-    if ($opt{export} or $recognized_extensions{$ext}) {
-	if ($ext eq 'asc' or 
-	    ($opt{export} and $opt{export} =~ /arc\/info/i and $opt{export} =~ /asc/)) {
-
-	    return ral_gd2a($self->{GRID}, $name);
-
-	} elsif ($ext eq 'ppm' or ($opt{export} and $opt{export} eq 'ppm')) {
-	    
-	    if ($opt{R} or $opt{G} or $opt{B} or $opt{H} or $opt{S} or $opt{V}) {
-		
-		if ($opt{H} or $opt{S} or $opt{V}) {
-		    
-		    for ('H','S','V') {
-			$opt{$_} = $self unless $opt{$_};
-		    }
-		    
-		    return ral_HSVgd2ppm($opt{H}->{GRID}, $opt{S}->{GRID}, $opt{V}->{GRID}, $name);
-
-		} else {
-
-		    for ('R','G','B') {
-			$opt{$_} = $self unless $opt{$_};
-		    }
-
-		    return ral_RGBgd2ppm($opt{R}->{GRID}, $opt{G}->{GRID}, $opt{B}->{GRID}, $name);
-
-		}
-		
-	    } else {
-		return ral_gd2ppm($self->{GRID}, $name, $self->{COLOR_TABLE});
-	    }
-
-	} elsif ($opt{export}) {
-	    croak "save Geo::Raster: $opt{export}: export method not supported";
-	} else {
-	    my $ret = ral_gd2ppm($self->{GRID}, "$name.tmp.ppm", $self->{COLOR_TABLE});
-	    my $options = $opt{options};
-	    $options = '' unless $options;
-	    $ret = system "$recognized_extensions{$ext} $options $name.tmp.ppm >$name" if $ret;
-	    system "rm -f $name.tmp.ppm";
-	    return $ret;
-	}
-    }
     if ($name) {
 	$name =~ s/\.(\w+)$//;
 	my $fh = new FileHandle;
         croak "can't write to $name.hdr: $!\n" unless $fh->open(">$name.hdr");
 
-	my($datatype, $M, $N, $unit_length, $minX, $maxX, $minY, $maxY, $nodata_value) = $self->attributes();
+	my($datatype, $M, $N, $cell_size, $minX, $maxX, $minY, $maxY, $nodata_value) = 
+	    $self->attributes();
+
+	# should be looked up from libral:!!
 	my $nbits = 16;
 	$nbits = 32 if $datatype == $REAL_GRID;
+
+	my $pt = 'S';
+	$pt = 'F' if $datatype == $REAL_GRID;
 
 	my $byteorder = $Config{byteorder} == 4321 ? 'M' : 'I';
 
@@ -712,18 +462,21 @@ sub save {
 	print $fh "NROWS         $M\n";
 	print $fh "NCOLS         $N\n";
 	print $fh "NBANDS        1\n";
+
+	print $fh "PIXELTYPE     $pt\n";
+
 	print $fh "NBITS         $nbits\n";
 	my $rowbytes = $nbits/8*$N;
 	print $fh "BANDROWBYTES         $rowbytes\n";
 	print $fh "TOTALROWBYTES        $rowbytes\n";
 	print $fh "BANDGAPBYTES         0\n";
-	print $fh "NODATA        $nodata_value\n";
-	$minX += $unit_length / 2;
-	$maxY -= $unit_length / 2;
+	print $fh "NODATA        $nodata_value\n" if defined $nodata_value;
+	$minX += $cell_size / 2;
+	$maxY -= $cell_size / 2;
 	print $fh "ULXMAP        $minX\n";
 	print $fh "ULYMAP        $maxY\n";
-	print $fh "XDIM          $unit_length\n";
-	print $fh "YDIM          $unit_length\n";
+	print $fh "XDIM          $cell_size\n";
+	print $fh "YDIM          $cell_size\n";
 	$fh->close;
 	return ral_gdwrite($self->{GRID}, $name.'.bil')
     }
@@ -792,7 +545,7 @@ sub restore {
     ral_gdset_all_integer($self->{GRID},0);
     while (<$from>) {
 	my($i, $j, $x) = split /,/;
-	_ral_gdset_real($self->{GRID}, $i, $j, $x);
+	ral_gdset_real($self->{GRID}, $i, $j, $x);
     }
     $from->close if $close;
 }
@@ -804,8 +557,7 @@ sub restore {
 
 The name of the grid is (or may be) the same as its filename
 (including the path) without extension. The name is set when a grid is
-constructed from a file (or files). The extension is used for import
-and export if it is one the recognized extensions.
+constructed from a file (or files).
 
 Setting and getting the name:
 
@@ -828,21 +580,21 @@ sub set_name {
 
 sub setbounds {
     my($self,%o) = @_;
-    if ($o{unit_length} and defined($o{minX}) and defined($o{minY})) {
+    if ($o{cell_size} and defined($o{minX}) and defined($o{minY})) {
 
-	ral_gdset_bounds_unn($self->{GRID}, $o{unit_length}, $o{minX}, $o{minY});
+	ral_gdset_bounds_csnn($self->{GRID}, $o{cell_size}, $o{minX}, $o{minY});
 
-    } elsif ($o{unit_length} and defined($o{minX}) and defined($o{maxY})) {
+    } elsif ($o{cell_size} and defined($o{minX}) and defined($o{maxY})) {
 
-	ral_gdset_bounds_unx($self->{GRID}, $o{unit_length}, $o{minX}, $o{maxY});
+	ral_gdset_bounds_csnx($self->{GRID}, $o{cell_size}, $o{minX}, $o{maxY});
 
-    } elsif ($o{unit_length} and defined($o{maxX}) and defined($o{minY})) {
+    } elsif ($o{cell_size} and defined($o{maxX}) and defined($o{minY})) {
 
-	ral_gdset_bounds_uxn($self->{GRID}, $o{unit_length}, $o{maxX}, $o{minY});
+	ral_gdset_bounds_csxn($self->{GRID}, $o{cell_size}, $o{maxX}, $o{minY});
 
-    } elsif ($o{unit_length} and defined($o{maxX}) and defined($o{maxY})) {
+    } elsif ($o{cell_size} and defined($o{maxX}) and defined($o{maxY})) {
 
-	ral_gdset_bounds_uxx($self->{GRID}, $o{unit_length}, $o{maxX}, $o{maxY});
+	ral_gdset_bounds_csxx($self->{GRID}, $o{cell_size}, $o{maxX}, $o{maxY});
 
     } elsif (defined($o{minX}) and defined($o{maxX}) and defined($o{minY})) {
 
@@ -878,13 +630,13 @@ sub copyboundsto {
 
 =head2 Setting the world coordinate system:
 
-    $gd->setbounds(unit_length=>1,
+    $gd->setbounds(cell_size=>1,
 		   minX=>0,
 		   minY=>0, 
 		   maxX=>10,
 		   maxY=>10);
 
-at least three parameters must be set: unit_length, minX and minY; minX,
+at least three parameters must be set: cell_size, minX and minY; minX,
 maxX and minY; or minX, minY and maxY. minX (or easting) is the left
 edge of the leftmost cell, i.e. _not_ the center of the leftmost cell.
 
@@ -906,35 +658,59 @@ sub cell_in {
 
 sub point_in {
     my($self, @point) = @_;
-    return ($point[0] >= $self->{MINX} and $point[0] <= $self->{MAXX} and 
-	    $point[1] >= $self->{MINY} and $point[1] <= $self->{MAXY})
+    return ($point[0] >= $self->{WORLD}->[0] and $point[0] <= $self->{WORLD}->[3] and 
+	    $point[1] >= $self->{WORLD}->[1] and $point[1] <= $self->{WORLD}->[2])
 }
 
 sub g2w {
     my($self, @cell) = @_;
-    my $point = _ral_gdcell2point($self->{GRID}, @cell);
+    if ($self->{GDAL}) {
+	my $gdal = $self->{GDAL};
+	my $x = $gdal->{world}->[0] + ($cell[1]+0.5)*$gdal->{cell_size};
+	my $y = $gdal->{world}->[3] - ($cell[0]+0.5)*$gdal->{cell_size};
+	return ($x,$y);
+    }
+    my $point = ral_gdcell2point( $self->{GRID}, @cell);
     return @$point;
 }
 
 
 sub w2g {
     my($self, @point) = @_;
-    my $cell = _ral_gdpoint2cell($self->{GRID}, @point);
+    if ($self->{GDAL}) {
+	my $gdal = $self->{GDAL};
+	$point[0] -= $gdal->{world}->[0];
+	$point[0] /= $gdal->{cell_size};
+	$point[1] = $gdal->{world}->[3] - $point[1];
+	$point[1] /= $gdal->{cell_size};
+	return (POSIX::floor($point[1]),POSIX::floor($point[0]));
+    }
+    my $cell = ral_gdpoint2cell($self->{GRID}, @point);
     return @$cell;
 }
 
 sub ga2wa {
     my($self, @ga) = @_;
-    my $ul = _ral_gdcell2point($self->{GRID}, @ga[0..1]);
-    my $lr = _ral_gdcell2point($self->{GRID}, @ga[2..3]);
+    if ($self->{GDAL}) {
+	my @ul = $self->g2w(@ga[0..1]);
+	my @lr = $self->g2w(@ga[2..3]);
+	return (@ul,@lr);
+    }
+    my $ul = ral_gdcell2point($self->{GRID}, @ga[0..1]);
+    my $lr = ral_gdcell2point($self->{GRID}, @ga[2..3]);
     return (@$ul,@$lr);
 }
 
 
 sub wa2ga {
     my($self, @wa) = @_;
-    my $ul = _ral_gdpoint2cell($self->{GRID}, @wa[0..1]);
-    my $lr = _ral_gdpoint2cell($self->{GRID}, @wa[2..3]);
+    if ($self->{GDAL}) {
+	my @ul = $self->w2g(@wa[0..1]);
+	my @lr = $self->w2g(@wa[2..3]);
+	return (@ul,@lr);
+    }
+    my $ul = ral_gdpoint2cell($self->{GRID}, @wa[0..1]);
+    my $lr = ral_gdpoint2cell($self->{GRID}, @wa[2..3]);
     return (@$ul,@$lr);
 }
 
@@ -947,27 +723,27 @@ sub wa2ga {
 
     $gd->removemask();
 
-The mask is used in ALL grid operations and affects ALL grids. The
-removemask method does not need to be called with the same grid as
-setmask.
+The mask is used in ALL grid operations made on _this_ grids.
 
 =cut
 
 
 sub setmask {
-    my $self = shift;
-    ral_gdsetmask($self->{GRID});
+    my($self,$mask) = @_;
+    ral_gdsetmask($self->{GRID}, $mask->{GRID});
 }
 
 
 sub getmask {
-    my $mask = new Geo::Raster(ral_gdgetmask());
+    my($self) = @_;
+    my $mask = new Geo::Raster(use=>ral_gdgetmask($self->{GRID}));
     return $mask;
 }
 
 
 sub removemask {  
-    ral_gdremovemask();
+    my($self) = @_;
+    ral_gdclearmask($self->{GRID});
 }
 
 
@@ -999,12 +775,12 @@ sub set {
     my($self, $i, $j, $x) = @_;
     if (defined($j)) {
 	if (!defined($x) or $x eq 'nodata') {
-	    return _ral_gdset_nodata($self->{GRID}, $i, $j);
+	    return ral_gdset_nodata($self->{GRID}, $i, $j);
 	}
 	if ($x =~ /^\d+$/) {
-	    return _ral_gdset_integer($self->{GRID}, $i, $j, $x);
+	    return ral_gdset_integer($self->{GRID}, $i, $j, $x);
 	} else {
-	    return _ral_gdset_real($self->{GRID}, $i, $j, $x);
+	    return ral_gdset_real($self->{GRID}, $i, $j, $x);
 	}
     } else {
 	if (ref($i) eq 'Geo::Raster') {
@@ -1038,7 +814,7 @@ sub setall {
 
 sub setall_nodata {
     my($self) = @_;
-    return ral_gdsetallnodata($self->{GRID});
+    return ral_gdset_all_nodata($self->{GRID});
 }
 
 =pod
@@ -1058,14 +834,19 @@ The same in world coordinates
 
 
 sub get {
-    my($self, $i, $j) = @_;
-    return _ral_gdget($self->{GRID}, $i, $j);
+    my($self, @cell) = @_;
+    if ($self->{GDAL}) {
+	my @point = $self->g2w(@cell);
+	@cell = $self->w2g(@point);
+    }
+    return ral_gdget($self->{GRID}, @cell);
 }
 
 sub wget {
-    my($self, $x, $y) = @_;
-    my $cell = _ral_gdpoint2cell($self->{GRID}, $x, $y);
-    return _ral_gdget($self->{GRID}, $cell->[0], $cell->[1]);
+    my($self, @point) = @_;
+    return unless $self->{GRID};
+    my $cell = ral_gdpoint2cell($self->{GRID}, @point);
+    return ral_gdget($self->{GRID}, $cell->[0], $cell->[1]);
 }
 
 
@@ -1136,8 +917,9 @@ see below.
 
 sub getminmax {
     my $self = shift;
+    return unless $self->{GRID};
     ral_gdset_minmax($self->{GRID});
-    my $minmax = _ral_gdget_minmax($self->{GRID});
+    my $minmax = ral_gdget_minmax($self->{GRID});
     return @$minmax;
 }
 
@@ -1146,7 +928,7 @@ sub getminmax {
 
 =head2 Retrieving the attributes of a grid (deprecated)
 
-    ($datatype, $M, $N, $unit_length, $minX, $minY, $maxX, $maxY, $nodata_value) = 
+    ($datatype, $M, $N, $cell_size, $minX, $minY, $maxX, $maxY, $nodata_value) = 
     $gd->attributes();
 
 Use the specific methods instead:
@@ -1155,7 +937,7 @@ Use the specific methods instead:
 
     ($M, $N) = $gd->size();
 
-    $length = $gd->unit_length();
+    $cell_size = $gd->cell_size();
 
     ($minX,$minY,$maxX,$maxY) = $gd->world();
 
@@ -1171,14 +953,20 @@ parameter to size method:
 
 sub attributes {
     my $self = shift;
+    return unless $self->{GRID};
     my $datatype = $self->{DATATYPE} = ral_gdget_datatype($self->{GRID}); 
     my $M = $self->{M} = ral_gdget_height($self->{GRID});
     my $N = $self->{N} = ral_gdget_width($self->{GRID});
-    my $unit_length = $self->{UNIT_LENGTH} = ral_gdget_unit_length($self->{GRID});
-    my $world = _ral_gdget_world($self->{GRID});
-    ($self->{MINX},$self->{MINY},$self->{MAXX},$self->{MAXY}) = @$world;
-    my $nodata = $self->{NODATA} = _ral_gdget_nodata_value($self->{GRID});
-    return($datatype, $M, $N, $unit_length, @$world, $nodata);
+    my $cell_size = $self->{CELL_SIZE} = ral_gdget_cell_size($self->{GRID});
+    my $world = $self->{WORLD} = ral_gdget_world($self->{GRID});
+    my $nodata = $self->{NODATA} = ral_gdget_nodata_value($self->{GRID});
+    return($datatype, $M, $N, $cell_size, @$world, $nodata);
+}
+
+
+sub has_data {
+    my $self = shift;
+    return ral_gd_has_data($self->{GRID});
 }
 
 
@@ -1199,22 +987,36 @@ sub size {
     }
 }
 
-sub unit_length {
+sub cell_size {
     my $self = shift;
-    my $length = $self->{UNIT_LENGTH} = ral_gdget_unit_length($self->{GRID});
+    my $length = $self->{CELL_SIZE} = ral_gdget_cell_size($self->{GRID});
 }
 
 
 sub world {
     my $self = shift;
-    my $world = _ral_gdget_world($self->{GRID});
-    ($self->{MINX},$self->{MINY},$self->{MAXX},$self->{MAXY}) = @$world;
-    return @$world;
+    my $true = shift;
+    my $w;
+    if ($true and $self->{GDAL}) {
+	$w = $self->{GDAL}->{world};
+    } else {
+	$w = ral_gdget_world($self->{GRID});
+    }
+    return @$w;
 }
 
 sub nodata_value {
     my $self = shift;
-    my $nodata_value = $self->{NODATA_VALUE} = _ral_gdget_nodata_value($self->{GRID});
+    my $nodata_value = shift;
+    if (defined $nodata_value) {
+	if ($self->{DATATYPE} == $INTEGER_GRID) {
+	    ral_gdset_integer_nodata_value($self->{GRID}, $nodata_value);
+	} else {
+	    ral_gdset_real_nodata_value($self->{GRID}, $nodata_value);
+	}
+    } else {
+	$nodata_value = $self->{NODATA} = ral_gdget_nodata_value($self->{GRID});
+    }
     return $nodata_value;
 }
 
@@ -1274,6 +1076,10 @@ sub bool {
     return 1;
 }
 
+sub stringify {
+    my $self = shift;
+    return "Geo::Raster=HASH()"; # the address??
+}
 
 sub clone { # thanks to anno4000@lublin.zrz.tu-berlin.de (Anno Siegel)
     my $self = shift;
@@ -1675,7 +1481,6 @@ sub round {
 	return unless $grid;
 	if (defined wantarray) {
 	    my $new = new Geo::Raster $grid;
-	    copy_attributes($self,$new);
 	    return $new;
 	} else {
 	    $self->_new_grid($grid);
@@ -1721,7 +1526,7 @@ sub ceil {
 	ral_gdceil($self->{GRID});
 	return $self;
     } else {
-	return main::ceil($self);
+	return POSIX::ceil($self);
     }
 }
 
@@ -1740,9 +1545,13 @@ sub cosh {
 
 sub floor {
     my $self = shift;
-    $self = new Geo::Raster($self) if defined wantarray;
-    ral_gdfloor($self->{GRID});
-    return $self;
+    if (ref($self)) {
+	$self = new Geo::Raster($self) if defined wantarray;
+	ral_gdfloor($self->{GRID});
+	return $self;
+    } else {
+	return POSIX::floor($self);
+    }
 }
 
 
@@ -1836,104 +1645,100 @@ B<-w> switch.
 sub lt {
     my($self, $second, $reversed) = @_;    
     $self = new Geo::Raster $self if defined wantarray;
-    my $g;
     if (ref($second)) {
-	$g = ral_gdltgd($self->{GRID}, $second->{GRID});
+	ral_gdltgd($self->{GRID}, $second->{GRID});
     } else {
 	if ($reversed) {
 	    if ($second =~ /^-?\d+$/) {
-		$g = ral_gdgtinteger($self->{GRID}, $second);
+		ral_gdgtinteger($self->{GRID}, $second);
 	    } else {
-		$g = ral_gdgtreal($self->{GRID}, $second);
+		ral_gdgtreal($self->{GRID}, $second);
 	    }
 	} else {
 	    if ($second =~ /^-?\d+$/) {
-		$g = ral_gdltinteger($self->{GRID}, $second);
+		ral_gdltinteger($self->{GRID}, $second);
 	    } else {
-		$g = ral_gdltreal($self->{GRID}, $second);
+		ral_gdltreal($self->{GRID}, $second);
 	    }
 	}
     }
     $self->{DATATYPE} = ral_gdget_datatype($self->{GRID}); # may have been changed
-    return $self if defined wantarray and $g;
+    return $self if defined wantarray;
 }
 
 
 sub gt {
     my($self, $second, $reversed) = @_;
     $self = new Geo::Raster $self if defined wantarray;
-    my $g;
     if (ref($second)) {
-	$g = ral_gdgtgd($self->{GRID}, $second->{GRID});
+	ral_gdgtgd($self->{GRID}, $second->{GRID});
     } else {
 	if ($reversed) {
 	    if ($second =~ /^-?\d+$/) {
-		$g = ral_gdltinteger($self->{GRID}, $second);
+		ral_gdltinteger($self->{GRID}, $second);
 	    } else {
-		$g = ral_gdltreal($self->{GRID}, $second);
+		ral_gdltreal($self->{GRID}, $second);
 	    }
 	} else {
 	    if ($second =~ /^-?\d+$/) {
-		$g = ral_gdgtinteger($self->{GRID}, $second);
+		ral_gdgtinteger($self->{GRID}, $second);
 	    } else {
-		$g = ral_gdgtreal($self->{GRID}, $second);
+		ral_gdgtreal($self->{GRID}, $second);
 	    }
 	}
     }
     $self->{DATATYPE} = ral_gdget_datatype($self->{GRID}); # may have been changed
-    return $self if defined wantarray and $g;
+    return $self if defined wantarray;
 }
 
 
 sub le {
     my($self, $second, $reversed) = @_;
     $self = new Geo::Raster $self if defined wantarray;
-    my $g;
     if (ref($second)) {
-	$g = ral_gdlegd($self->{GRID}, $second->{GRID});
+	ral_gdlegd($self->{GRID}, $second->{GRID});
     } else {
 	if ($reversed) {
 	    if ($second =~ /^-?\d+$/) {
-		$g = ral_gdgeinteger($self->{GRID}, $second);
+		ral_gdgeinteger($self->{GRID}, $second);
 	    } else {
-		$g = ral_gdgereal($self->{GRID}, $second);
+		ral_gdgereal($self->{GRID}, $second);
 	    }
 	} else {
 	    if ($second =~ /^-?\d+$/) {
-		$g = ral_gdleinteger($self->{GRID}, $second);
+		ral_gdleinteger($self->{GRID}, $second);
 	    } else {
-		$g = ral_gdlereal($self->{GRID}, $second);
+		ral_gdlereal($self->{GRID}, $second);
 	    }
 	}
     }
     $self->{DATATYPE} = ral_gdget_datatype($self->{GRID}); # may have been changed
-    return $self if defined wantarray and $g;
+    return $self if defined wantarray;
 }
 
 
 sub ge {
     my($self, $second, $reversed) = @_;
     $self = new Geo::Raster $self if defined wantarray;
-    my $g;
     if (ref($second)) {
-	$g = ral_gdgegd($self->{GRID}, $second->{GRID});
+	ral_gdgegd($self->{GRID}, $second->{GRID});
     } else {
 	if ($reversed) {
 	    if ($second =~ /^-?\d+$/) {
-		$g = ral_gdleinteger($self->{GRID}, $second);
+		ral_gdleinteger($self->{GRID}, $second);
 	    } else {
-		$g = ral_gdlereal($self->{GRID}, $second);
+		ral_gdlereal($self->{GRID}, $second);
 	    }
 	} else {
 	    if ($second =~ /^-?\d+$/) {
-		$g = ral_gdgeinteger($self->{GRID}, $second);
+		ral_gdgeinteger($self->{GRID}, $second);
 	    } else {
-		$g = ral_gdgereal($self->{GRID}, $second);
+		ral_gdgereal($self->{GRID}, $second);
 	    }
 	}
     }
     $self->{DATATYPE} = ral_gdget_datatype($self->{GRID}); # may have been changed
-    return $self if defined wantarray and $g;
+    return $self if defined wantarray;
 }
 
 
@@ -1941,18 +1746,17 @@ sub eq {
     my $self = shift;
     my $second = shift;
     $self = new Geo::Raster $self if defined wantarray;
-    my $g;
     if (ref($second)) {
-	$g = ral_gdeqgd($self->{GRID}, $second->{GRID});
+	ral_gdeqgd($self->{GRID}, $second->{GRID});
     } else {
 	if ($second =~ /^-?\d+$/) {
-	    $g = ral_gdeqinteger($self->{GRID}, $second);
+	    ral_gdeqinteger($self->{GRID}, $second);
 	} else {
-	    $g = ral_gdeqreal($self->{GRID}, $second);
+	    ral_gdeqreal($self->{GRID}, $second);
 	}
     }
     $self->{DATATYPE} = ral_gdget_datatype($self->{GRID}); # may have been changed
-    return $self if defined wantarray and $g;
+    return $self if defined wantarray;
 }
 
 
@@ -1960,32 +1764,30 @@ sub ne {
     my $self = shift;
     my $second = shift;
     $self = new Geo::Raster $self if defined wantarray;
-    my $g;
     if (ref($second)) {
-	$g = ral_gdnegd($self->{GRID}, $second->{GRID});
+	ral_gdnegd($self->{GRID}, $second->{GRID});
     } else {
 	if ($second =~ /^-?\d+$/) {
-	    $g = ral_gdneinteger($self->{GRID}, $second);
+	    ral_gdneinteger($self->{GRID}, $second);
 	} else {
-	    $g = ral_gdnereal($self->{GRID}, $second);
+	    ral_gdnereal($self->{GRID}, $second);
 	}
     }
     $self->{DATATYPE} = ral_gdget_datatype($self->{GRID}); # may have been changed
-    return $self if defined wantarray and $g;
+    return $self if defined wantarray;
 }
 
 
 sub cmp {
     my($self, $second, $reversed) = @_;
     $self = new Geo::Raster $self if defined wantarray;
-    my $g;
     if (ref($second)) {
-	$g = ral_gdcmpgd($self->{GRID}, $second->{GRID});
+	ral_gdcmpgd($self->{GRID}, $second->{GRID});
     } else {
 	if ($second =~ /^-?\d+$/) {
-	    $g = ral_gdcmpinteger($self->{GRID}, $second);
+	    ral_gdcmpinteger($self->{GRID}, $second);
 	} else {
-	    $g = ral_gdcmpreal($self->{GRID}, $second);
+	    ral_gdcmpreal($self->{GRID}, $second);
 	}
 	if ($reversed) {
 	    if ($second =~ /^-?\d+$/) {
@@ -1996,7 +1798,7 @@ sub cmp {
 	}
     }
     $self->{DATATYPE} = ral_gdget_datatype($self->{GRID}); # may have been changed
-    return $self if defined wantarray and $g;
+    return $self if defined wantarray;
 }
 
 =pod
@@ -2027,8 +1829,8 @@ use Geo::Raster /:logics/;
 sub not {
     my $self = shift;
     $self = new Geo::Raster $self if defined wantarray;
-    my $g = ral_gdnot($self->{GRID});
-    return $self if defined wantarray and $g;
+    ral_gdnot($self->{GRID});
+    return $self if defined wantarray;
 }
 
 
@@ -2036,8 +1838,8 @@ sub and {
     my $self = shift;
     my $second = shift;
     $self = new Geo::Raster $self if defined wantarray;
-    my $g = ral_gdandgd($self->{GRID}, $second->{GRID});
-    return $self if defined wantarray and $g;
+    ral_gdandgd($self->{GRID}, $second->{GRID});
+    return $self if defined wantarray;
 }
 
 
@@ -2045,8 +1847,8 @@ sub or {
     my $self = shift;
     my $second = shift;
     $self = new Geo::Raster $self if defined wantarray;
-    my $g = ral_gdorgd($self->{GRID}, $second->{GRID});
-    return $self if defined wantarray and $g;
+    ral_gdorgd($self->{GRID}, $second->{GRID});
+    return $self if defined wantarray;
 }
 
 =pod
@@ -2072,24 +1874,22 @@ sub min {
     my $self = shift;
     my $second = shift;
     $self = new Geo::Raster $self if defined wantarray;
-    my $g;
     if (ref($second)) {
-	$g = ral_gdmingd($self->{GRID}, $second->{GRID});
+	ral_gdmingd($self->{GRID}, $second->{GRID});
     } else {
 	if (defined($second)) {
 	    if ($second =~ /^-?\d+$/) {
 		ral_gdmininteger($self->{GRID}, $second);
-		$g = 1;
 	    } else {
-		$g = ral_gdminreal($self->{GRID}, $second);
+		ral_gdminreal($self->{GRID}, $second);
 	    }
 	} else {
 	    ral_gdset_minmax($self->{GRID});
-	    my $minmax = _ral_gdget_minmax($self->{GRID});
+	    my $minmax = ral_gdget_minmax($self->{GRID});
 	    return $minmax->[0];
 	}
     }
-    return $self if defined wantarray and $g;
+    return $self if defined wantarray;
 }
 
 
@@ -2097,23 +1897,22 @@ sub max {
     my $self = shift;
     my $second = shift;   
     $self = new Geo::Raster $self if defined wantarray;
-    my $g;
     if (ref($second)) {
-	$g = ral_gdmaxgd($self->{GRID}, $second->{GRID});
+	ral_gdmaxgd($self->{GRID}, $second->{GRID});
     } else {
 	if (defined($second)) {
 	    if ($second =~ /^-?\d+$/) {
-		$g = ral_gdmaxinteger($self->{GRID}, $second);
+		ral_gdmaxinteger($self->{GRID}, $second);
 	    } else {
-		$g = ral_gdmaxreal($self->{GRID}, $second);
+		ral_gdmaxreal($self->{GRID}, $second);
 	    }
 	} else {
 	    ral_gdset_minmax($self->{GRID});
-	    my $minmax = _ral_gdget_minmax($self->{GRID});
+	    my $minmax = ral_gdget_minmax($self->{GRID});
 	    return $minmax->[1];
 	}
     }
-    return $self if defined wantarray and $g;
+    return $self if defined wantarray;
 }
 
 
@@ -2149,7 +1948,7 @@ sub cross {
 
 =head2 if ... then construct for grids
 
-    $a->if_then($b, $c);
+    $a->if($b, $c);
 
 $a and $b are grids and $c can be a grid or a scalar, the
 effect of this subroutine is:
@@ -2158,7 +1957,7 @@ for all i,j if (b[i,j]) then a[i,j]=c[i,j]
 
 if a return value is requested
 
-    $d = $a->if_then($b, $c);
+    $d = $a->if($b, $c);
 
 then d is a but if b then c
 
@@ -2169,43 +1968,42 @@ obtained using the zonal functions (see below).
 
 =cut
 
-sub if_then {
+sub if {
     my $a = shift;
     my $b = shift;    
     my $c = shift;
     my $d = shift;
-    my $ret;
     $a = new Geo::Raster ($a) if defined wantarray;
+    croak "usage $a->if($b, $c)" unless defined $c;
     if (ref($c)) {
 	if (ref($c) eq 'Geo::Raster') {
-	    $ret = ral_gdif_then_gd($b->{GRID}, $a->{GRID}, $c->{GRID});
+	    ral_gdif_then_gd($b->{GRID}, $a->{GRID}, $c->{GRID});
 	} elsif (ref($c) eq 'HASH') {
 	    my(@k,@v);
 	    foreach (keys %{$c}) {
 		push @k, int($_);
 		push @v, $c->{$_};
 	    }
-	    $ret = ral_gdzonal_if_then_real($b->{GRID}, $a->{GRID}, \@k, \@v, $#k+1);
+	    ral_gdzonal_if_then_real($b->{GRID}, $a->{GRID}, \@k, \@v, $#k+1);
 	} else {
-	    croak("if_then: usage: if_then->(Geo::Raster, [Geo::Raster|HASH])");
+	    croak("usage: $a->if($b, $c)");
 	}
     } else {
 	unless (defined $d) {
 	    if ($c =~ /^-?\d+$/) {
-		$ret = ral_gdif_then_integer($b->{GRID}, $a->{GRID}, $c);
+		ral_gdif_then_integer($b->{GRID}, $a->{GRID}, $c);
 	    } else {
-		$ret = ral_gdif_then_real($b->{GRID}, $a->{GRID}, $c);
+		ral_gdif_then_real($b->{GRID}, $a->{GRID}, $c);
 	    }
 	} else {
 	    if ($c =~ /^-?\d+$/) {
-		$ret = ral_gdif_then_else_integer($b->{GRID}, $a->{GRID}, $c, $d);
+		ral_gdif_then_else_integer($b->{GRID}, $a->{GRID}, $c, $d);
 	    } else {
-		$ret = ral_gdif_then_else_real($b->{GRID}, $a->{GRID}, $c, $d);
+		ral_gdif_then_else_real($b->{GRID}, $a->{GRID}, $c, $d);
 	    }
 	}
     }
     return $a if defined wantarray;
-    return $ret;
 }
 
 =pod
@@ -2244,7 +2042,6 @@ sub bufferzone {
     croak "method usage: bufferzone($z, $w)" unless defined($w);
     if (defined wantarray) {
 	my $g = new Geo::Raster(gdbufferzone($self->{GRID}, $z, $w));
-	copy_attributes($self,$g);
 	return $g;
     } else {
 	$self->_new_grid(gdbufferzone($self->{GRID}, $z, $w));
@@ -2306,7 +2103,6 @@ sub distances {
     my($self) = @_;
     if (defined wantarray) {
 	my $g = new Geo::Raster(ral_gddistances($self->{GRID}));
-	copy_attributes($self,$g);
 	return $g;
     } else {
 	$self->_new_grid(ral_gddistances($self->{GRID}));
@@ -2338,7 +2134,6 @@ sub directions {
     my($self) = @_;
     if (defined wantarray) {
 	my $g = new Geo::Raster(ral_gddirections($self->{GRID}));
-	copy_attributes($self,$g);
 	return $g;
     } else {
 	$self->_new_grid(ral_gddirections($self->{GRID}));
@@ -2366,11 +2161,10 @@ sub clip {
     if (@_ == 4) {
 	my($i1, $j1, $i2, $j2) = @_;
 	if (defined wantarray) {
-	    my $g = new Geo::Raster(_ral_gdclip($self->{GRID}, $i1, $j1, $i2, $j2));
-	    copy_attributes($self,$g);
+	    my $g = new Geo::Raster(ral_gdclip($self->{GRID}, $i1, $j1, $i2, $j2));
 	    return $g;
 	} else {
-	    $self->_new_grid(_ral_gdclip($self->{GRID}, $i1, $j1, $i2, $j2));
+	    $self->_new_grid(ral_gdclip($self->{GRID}, $i1, $j1, $i2, $j2));
 	}
     } else {
 	my $gd = shift;
@@ -2379,18 +2173,17 @@ sub clip {
 	my($i1,$j1) = $self->w2g($a[4],$a[7]);
 	my($i2,$j2) = ($i1+$a[1]-1,$j1+$a[2]-1);
 	if (defined wantarray) {
-	    my $g = new Geo::Raster(_ral_gdclip($self->{GRID}, $i1, $j1, $i2, $j2));
-	    copy_attributes($self,$g);
+	    my $g = new Geo::Raster(ral_gdclip($self->{GRID}, $i1, $j1, $i2, $j2));
 	    return $g;
 	} else {
-	    $self->_new_grid(_ral_gdclip($self->{GRID}, $i1, $j1, $i2, $j2));
+	    $self->_new_grid(ral_gdclip($self->{GRID}, $i1, $j1, $i2, $j2));
 	}
     }
 }
 
 =pod
 
-=head2 Joining two grids:
+=head2 Joining two grids: (NOTE: this is from before gdal/cache)
 
     $g3 = $g1->join($g2);
 
@@ -2409,7 +2202,6 @@ sub join {
     my $second = shift;
     if (defined wantarray) {
 	my $g = new Geo::Raster(ral_gdjoin($self->{GRID}, $second->{GRID}));
-	copy_attributes($self,$g);
 	return $g;
     } else {
 	$self->_new_grid(ral_gdjoin($self->{GRID}, $second->{GRID}));
@@ -2447,8 +2239,8 @@ above, and rounding the indexes to the nearest integer value.
 
 In the case when $pick is defined, the value which is stored into the
 target grid is calculated from the (possibly rectangular) area into
-which the i2,j2 cell maps to. NOTE: In this case the pixel coordinates
-are assumed to denote the upper left corner of the pixel. This makes
+which the i2,j2 cell maps to. NOTE: In this case the cell coordinates
+are assumed to denote the upper left corner of the cell. This makes
 it easy to keep the (x,y) of the upper left the same BUT it is
 different than the usual assumption that (i,j) denotes the center of
 the cell.
@@ -2468,7 +2260,6 @@ sub transform {
     croak "transform: transformation matrix incomplete" if $#$tr<5;
     if (defined wantarray) {
 	my $g = new Geo::Raster(ral_gdtransform($self->{GRID}, $tr, $M, $N, $pick, $value));
-	copy_attributes($self,$g);
 	return $g;
     } else {
 	$self->_new_grid(ral_gdtransform($self->{GRID}, $tr, $M, $N, $pick, $value));
@@ -2504,7 +2295,7 @@ The $aref is a reference to an array of cells and values:
 
 sub array {
     my($self,%opt) = @_;
-    my $a = _ral_gd2list($self->{GRID});
+    my $a = ral_gd2list($self->{GRID});
     return $a;
 }
 
@@ -2524,7 +2315,6 @@ sub frame {
     my($datatype, $M, $N) = ($self->attrib())[0..2];
     if (defined wantarray) {
 	my $g = new Geo::Raster($datatype, $M, $N);
-	copy_attributes($self,$g);
 	ral_gdcopy_bounds($self->{GRID}, $g->{GRID});
 	$self = $g;
     }
@@ -2566,7 +2356,7 @@ sub histogram {
     $bins = 20 unless $bins;
     my $a;
     if (ref($bins)) {
-	$a = _gdhistogram($self->{GRID}, $bins, $#$bins+1);
+	$a = gdhistogram($self->{GRID}, $bins, $#$bins+1);
 	return @$a;
     } else {
 	my $bins = int($bins);
@@ -2606,7 +2396,7 @@ grids.
 sub contents {
     my $self = shift;
     if ($self->{DATATYPE} == $INTEGER_GRID) {
-	return _gdcontents($self->{GRID});
+	return gdcontents($self->{GRID});
     } else {
 	my $c = $self->array();
 	my %d;
@@ -2660,12 +2450,12 @@ zoned.
 
 sub zones {
     my($self, $zones) = @_;
-    return _gdzones($self->{GRID}, $zones->{GRID});
+    return gdzones($self->{GRID}, $zones->{GRID});
 }
 
 sub zonalfct {
     my($self, $zones, $fct) = @_;
-    my $z = _gdzones($self->{GRID}, $zones->{GRID});
+    my $z = gdzones($self->{GRID}, $zones->{GRID});
     my %m;
     foreach (keys %{$z}) {
 	my $stat = Statistics::Descriptive::Full->new();
@@ -2678,41 +2468,40 @@ sub zonalfct {
 
 sub zonalcount {
     my($self, $zones) = @_;
-    return _gdzonalcount($self->{GRID}, $zones->{GRID});
+    return gdzonalcount($self->{GRID}, $zones->{GRID});
 }
 
 sub zonalsum {
     my($self, $zones) = @_;
-    return _gdzonalsum($self->{GRID}, $zones->{GRID});
+    return gdzonalsum($self->{GRID}, $zones->{GRID});
 }
 
 sub zonalmin {
     my($self, $zones) = @_;
-    return _gdzonalmin($self->{GRID}, $zones->{GRID});
+    return gdzonalmin($self->{GRID}, $zones->{GRID});
 }
 
 sub zonalmax {
     my($self, $zones) = @_;
-    return _gdzonalmax($self->{GRID}, $zones->{GRID});
+    return gdzonalmax($self->{GRID}, $zones->{GRID});
 }
 
 sub zonalmean {
     my($self, $zones) = @_;
-    return _gdzonalmean($self->{GRID}, $zones->{GRID});
+    return gdzonalmean($self->{GRID}, $zones->{GRID});
 }
 
 sub zonalvariance {
     my($self, $zones) = @_;
-    return _gdzonalvariance($self->{GRID}, $zones->{GRID});
+    return gdzonalvariance($self->{GRID}, $zones->{GRID});
 }
 
 sub growzones {
     my($zones, $grow, $connectivity) = @_;
     $connectivity = 8 unless defined($connectivity);
     $zones = new Geo::Raster $zones if defined wantarray;
-    my $ret = ral_gdgrowzones($zones->{GRID}, $grow->{GRID}, $connectivity);
-    return $zones if defined wantarray and $ret;
-    return $ret;
+    ral_gdgrowzones($zones->{GRID}, $grow->{GRID}, $connectivity);
+    return $zones if defined wantarray;
 }
 
 =pod
@@ -2749,7 +2538,6 @@ sub interpolate {
 	return;
     }
     if (defined wantarray) {
-	copy_attributes($self,$new);
 	return $new;
     } else {
 	my $tmp = $new->{GRID};
@@ -2772,13 +2560,13 @@ function string is '2*$x+3*$y', which creates a plane.
 
 sub function {
     my($self, $fct) = @_;
-    my(undef, $M, $N, $unit_length, $minX, $minY, $maxX, $maxY) = $self->attributes();
-    my $y = $minY+$unit_length/2;
+    my(undef, $M, $N, $cell_size, $minX, $minY, $maxX, $maxY) = $self->attributes();
+    my $y = $minY+$cell_size/2;
     for my $i (0..$M-1) {
-	my $x = $minX+$unit_length/2;
-	$y += $unit_length;
+	my $x = $minX+$cell_size/2;
+	$y += $cell_size;
 	for my $j (0..$N-1) {
-	    $x += $unit_length;
+	    $x += $cell_size;
 	    my $z = eval $fct;
 	    $self->set($i, $j, $z);
 	}
@@ -2788,10 +2576,9 @@ sub function {
 
 sub dijkstra {
     my($self, $i, $j) = @_;
-    my $cost = _ral_dijkstra($self->{GRID}, $i, $j);
+    my $cost = ral_dijkstra($self->{GRID}, $i, $j);
     return unless $cost;
     $cost = new Geo::Raster $cost;
-    copy_attributes($self,$cost);
     return $cost;
 }
 
@@ -2799,168 +2586,6 @@ sub dijkstra {
 =pod
 
 =head1 GRAPHICS
-
-=head2 The color system
-
-Plotting is grayscale unless a colortable is created for the grid;
-
-    $gd->colortable(number_of_colors=>number_of_colors,
-		    extra_colors=>extra_colors,
-		    contrast=>contra, 
-		    brightness=>brightness,
-		    offset=>offset);
-
-This creates a new colortable (and disposes of the old one). All
-parameters are optional. The default number of colors is maxvalue -
-minvalue + 1 for integer grids, for real grids there is no default
-value (an error is croaked). The default number of extra colors is
-0. Contrast is the contrast of the color ramp (default is
-1.0). Negative values reverse the direction of the ramp.  Brightness
-is the brightness of the color ramp. Default is 0.5, but can sensibly
-hold any value between 0.0 and 1.0. Values at or beyond the latter two
-extremes, saturate the color ramp with the colors of the respective
-end of the color table. Offset is for those cases when the minimum
-value in the grid is not zero, the default is the minimum value in the
-grid.  (mostly from pgplot.doc)
-
-    $gd->color($i, $l, $r, $g, $b);
-or
-    $gd->color($i, $r, $g, $b);
-or
-    $gd->color($i, colorname);
-
-If colorname is given, the method tries to look up its RGB values
-from the file /usr/X11/lib/X11/rgb.txt.
-
-This sets one color at index i (first index is 0 or offset if you have
-set it -- it may have been defined for you as the minimum value of the
-raster in method colortable) in the colortable. l is a normalized
-ramp-intensity level corresponding to the RGB primary color
-intensities r, g, and b. l can be set by the method to value $i /
-($self->{COLOR_TABLE_SIZE} - 1). Colors on the ramp are linearly
-interpolated from neighbouring levels. Levels must be sorted in
-increasing order.  0.0 places a color at the beginning of the ramp.
-1.0 places a color at the end of the ramp.  Colors outside these
-limits are legal, but will not be visible if contra=1.0 and
-bright=0.5. r, g, and b values should be integers between 0 and
-255. (mostly from pgplot.doc)
-
-More colors can be added to the colortable using method
-
-    $gd->addcolors($newcolors);
-
-Typically colors are retrieved into a grid from the database using the
-method rgb. See below.
-
-A color can be returned from the colormap using the color method 
-with only the index:
-
-    ($r, $g, $b) = $gd->color($i);
-
-The whole colortable is returned by the method get_colortable;
-
-    $colortable = $gd->get_colortable();
-
-$colortable is a hash with colortable indexes as keys and references
-to ($r, $g, $b) arrays as values.
-
-=cut
-
-sub colortable {
-    my($self, %opt) = @_;
-    ral_ctdestroy($self->{COLOR_TABLE}) if $self->{COLOR_TABLE};
-    delete $self->{COLOR_TABLE};
-    delete($self->{RGBI});
-    delete($self->{IRGB});
-    my($min, $max) = getminmax($self);
-    $opt{offset} = $min unless defined $opt{offset};
-    unless (defined $opt{number_of_colors}) {
-	croak "number of colors not set" unless 
-	    $self->{DATATYPE} == $INTEGER_GRID;
-	$opt{number_of_colors} = $max - $min + 1 ;
-    }
-    $opt{extra_colors} = 0 unless defined $opt{extra_colors};
-    $opt{contrast} = 1.0 unless defined $opt{contrast};
-    $opt{brightness} = 0.5 unless defined $opt{brightness};
-    $self->{COLOR_TABLE_OFFSET} = $opt{offset};
-    $self->{COLOR_TABLE_SIZE} = $opt{number_of_colors} + $opt{extra_colors};
-    $self->{COLOR_TABLE} = ral_ctcreate($self->{COLOR_TABLE_SIZE}, 
-					$opt{contrast}, 
-					$opt{brightness});
-    return $self->{COLOR_TABLE};
-}
-
-
-sub get_colortable {
-    my $self = shift;
-    croak "no colortable" unless $self->{COLOR_TABLE};
-    my $offset = $self->{COLOR_TABLE_OFFSET};
-    $self->{COLOR_TABLE_OFFSET} = 0;
-    my %ct;
-    for my $i (0..$self->{COLOR_TABLE_SIZE}-1) {
-	$ct{$i} = [$self->color($i)];
-    }
-    $self->{COLOR_TABLE_OFFSET} = $offset;
-    return \%ct;
-}
-
-
-sub color {
-    my $self = shift;
-    croak "no colortable" unless $self->{COLOR_TABLE};
-    my $i = shift;
-    $i -= $self->{COLOR_TABLE_OFFSET} if $self->{COLOR_TABLE_OFFSET};
-    if ($#_ == -1) {
-	my $r = ral_ctgetr($self->{COLOR_TABLE}, $i);
-	my $g = ral_ctgetg($self->{COLOR_TABLE}, $i);
-	my $b = ral_ctgetb($self->{COLOR_TABLE}, $i);
-	return (round($r*255), round($g*255), round($b*255));
-    }
-    if ($#_ == 0) {	
-	my $rgb = shift;
-	my @rgb = `grep $rgb /usr/X11/lib/X11/rgb.txt`;
-	croak "color $rgb not found in X11 rgb.txt" if $#rgb < 0;
-	my($r, $g, $b) = split /\s+/, $rgb[0];
-	push @_, ($r, $g, $b);
-    }
-    if ($#_ == 3) {
-	my($l, $r, $g, $b) = @_;
-	$self->{RGBI}->{"$r, $g, $b"} = $i;
-	$self->{IRGB}->{$i} = "$r, $g, $b";
-	return ral_ctset($self->{COLOR_TABLE}, $i, $l, $r/255, $g/255, $b/255);
-    } elsif ($#_ == 2) {
-	my($r, $g, $b) = @_;
-	$self->{RGBI}->{"$r, $g, $b"} = $i;
-	$self->{IRGB}->{$i} = "$r, $g, $b";
-#	my $l = 0.5;
-#	$l = $i / ($self->{COLOR_TABLE_SIZE} - 1) if $self->{COLOR_TABLE_SIZE} > 1;
-	return ral_ctset($self->{COLOR_TABLE}, $i, 1, $r/255, $g/255, $b/255);
-    }
-}
-
-
-sub addcolors {
-    my($self, $newcolors) = @_;
-    return unless $self->{COLOR_TABLE};
-    my $contrast = ral_ctget_contrast($self->{COLOR_TABLE});
-    my $brightness = ral_ctget_brightness($self->{COLOR_TABLE});
-    my $old_size = $self->{COLOR_TABLE_SIZE};
-    my %old_table;
-    %old_table = %{$self->{IRGB}} if $self->{IRGB};
-    $self->colortable(number_of_colors=>($old_size + $newcolors),
-		      offset=>$self->{COLOR_TABLE_OFFSET},
-		      contrast=>$contrast,
-		      brightness=>$brightness);
-    if (%old_table) {
-	foreach (sort {$a<=>$b} keys %old_table) {
-	    my($r, $g, $b) = split /,/, $old_table{$_};
-	    $self->color($_, $r, $g, $b);
-	}
-    }
-    return $old_size+$self->{COLOR_TABLE_OFFSET};
-}
-
-=pod
 
 =head2 Primitives:
 
@@ -2987,7 +2612,7 @@ sub line {
     unless (defined $pen) {
 	return ral_gdget_line($self->{GRID}, $i1, $j1, $i2, $j2);
     } else {
-	_ral_gdline($self->{GRID}, $i1, $j1, $i2, $j2, round($pen), $pen);
+	ral_gdline($self->{GRID}, $i1, $j1, $i2, $j2, round($pen), $pen);
     }
 }
 
@@ -2997,7 +2622,7 @@ sub rect {
     unless (defined $pen) {
 	return ral_gdget_rect($self->{GRID}, $i1, $j1, $i2, $j2);
     } else {
-	_ral_gdfilledrect($self->{GRID}, $i1, $j1, $i2, $j2, round($pen), $pen);
+	ral_gdfilledrect($self->{GRID}, $i1, $j1, $i2, $j2, round($pen), $pen);
     }
 }
 
@@ -3006,133 +2631,14 @@ sub circle {
     unless (defined $pen) {
 	return ral_gdget_circle($self->{GRID}, $i, $j, round($r), round($r*$r));
     } else {
-	_ral_gdfilledcircle($self->{GRID}, $i, $j, round($r), round($r*$r), round($pen), $pen);
+	ral_gdfilledcircle($self->{GRID}, $i, $j, round($r), round($r*$r), round($pen), $pen);
     }
 }
 
 sub floodfill {
     my($self, $i, $j, $pen, $connectivity) = @_;
     $connectivity = 8 unless $connectivity;
-    _ral_gdfloodfill($self->{GRID}, $i, $j, round($pen), $pen, $connectivity);
-}
-
-=pod
-
-=head2 Plotting, viewing, and editing a grid
-
-The plain plot:
-
-    $gd->plot(%options); 
-
-device and donotsetminmax and visual can be set using options. device
-is a pgplot device, the default is "/xserve". donotsetminmax skips
-setminmax before plotting. Visual options are labels_off and scale.
-labels_off skips showing of (vector data) labels. scale skips scaling
-of x and y-axis. width sets the initial width (in inches) of
-the plotting window, it is 7 unless set. Plot returns right after it
-has done its job, i.e. it does not remain in interactive state as
-view:
-
-    $gd->view(%options);
-
-The interactive state in view includes export, redraw, scroll, zoom,
-restore, and area calculation. Using the method drawon adds the capability 
-of drawing lines and rectangles on the viewed grid. The mehod returns
-the drawn layer as a grid:
-    
-    $drawing = $gd->drawon(%options);
-
-In the case of interactive methods (view and drawon) the device option
-can be used to specify the export device, "/ps" is the default.
-
-In all plotting integer grids are first converted to real grids
-internally.
-
-=head2 Using multiple windows
-
-Opening two pgplot windows:
-
-    $w1 = &Geo::Raster::ral_gdwindow_open;
-    $w2 = &Geo::Raster::ral_gdwindow_open;
-
-Plotting two grids to these two windows:
-
-    $g1->plot(window=>$w1);
-    $g2->plot(window=>$w2);
-
-The windows are always automatically closed after plotting. Thus you
-need to reopen them using &Geo::Raster::gdwindow_open again if you want to
-use multiple windows.
-
-An opened window can be closed explicitly by subroutine
-
-   &Geo::Raster::ral_gdwindow_close($window);
-
-Either plot a grid or close explicitly an opened window.
-
-=cut
-
-sub _plot {
-    my($self, $o) = @_;
-    ral_gdset_minmax($self->{GRID}) unless $o->{donotsetminmax};
-    $o->{_draw} = -1 unless defined($o->{_draw});
-    $o->{window} = 0 unless $o->{window};
-    $o->{width} = 7 unless $o->{width};
-    my $ret = ral_gdplot($self->{GRID}, $o->{device}, $o->{window},
-			 $self->{COLOR_TABLE}, $o->{_draw},
-			 $o->{width}, $o->{pap}, $o->{close});
-    return $ret;
-}
-
-sub begin_animate {
-    my($self, %o) = @_;
-    $o{_draw} = -1;
-    $o{close} = 0;
-    $o{device} = '/xserve';
-    $self->{window} = ral_gdwindow_open();
-    $o{window} = $self->{window};
-    $o{pap} = 1;
-    $self->_plot(\%o);
-    $self->{width} = $o{width};
-}
-
-sub animate {
-    my($self) = @_;
-    ral_gdplot($self->{GRID}, '/xserve', $self->{window},
-	       $self->{COLOR_TABLE}, -1,
-	       $self->{width}, 0, 0);
-}
-
-sub end_animate {
-    my($self, %o) = @_;
-    ral_gdwindow_close($self->{window});
-}
-
-sub plot {
-    my($self, %o) = @_;
-    $o{_draw} = -1;
-    $o{close} = 1;
-    $o{device} = '/xserve' unless $o{device};
-    $o{pap} = 1;
-    $self->_plot(\%o);
-}
-
-sub view {
-    my($self, %o) = @_;
-    $o{_draw} = 0;
-    $o{close} = 1;
-    $o{device} = '/ps' unless $o{device};
-    $o{pap} = 1;
-    $self->_plot(\%o);
-}
-
-sub drawon {
-    my($self, %o) = @_;
-    $o{_draw} = 1;
-    $o{close} = 1;
-    $o{device} = '/ps' unless $o{device};
-    $o{pap} = 1;
-    return new Geo::Raster($self->_plot(\%o));
+    ral_gdfloodfill($self->{GRID}, $i, $j, round($pen), $pen, $connectivity);
 }
 
 =pod
@@ -3174,14 +2680,14 @@ sub map {
     }
     my $n = $#source+1;
     $self = new Geo::Raster $self if defined wantarray;
-    my $ret = ral_gdmap($self->{GRID}, \@source, \@destiny, $n);
-    return $self if defined wantarray and $ret;
+    ral_gdmap($self->{GRID}, \@source, \@destiny, $n);
+    return $self if defined wantarray;
 }
 
 
 sub neighbors {
     my $self = shift;
-    $a = _gdneighbors($self->{GRID});
+    $a = gdneighbors($self->{GRID});
     return $a;
 }
 
@@ -3273,11 +2779,8 @@ sub applytempl {
     croak "applytempl: too few values in the template" if $#$templ < 8;
     $new_val = 1 unless $new_val;
     $self = new Geo::Raster $self if defined wantarray;
-
-# discarding the count how many times template matched
-    my $ret = ral_gdapplytempl($self->{GRID}, $templ, $new_val); 
-
-    return $self if defined wantarray and $ret >= 0;
+    ral_gdapplytempl($self->{GRID}, $templ, $new_val); 
+    return $self if defined wantarray;
 }
 
 
@@ -3301,7 +2804,7 @@ different, and more generic way, I believe). Options are algorithm=>,
 trimming=>, maxiterations=>, and width=>. Algorithm is by default "B"
 (other option is "A"), trimming is by default 0 (other option is 1),
 and maxiterations is by default 0 (no maximum, will iterate until no
-pixels are deleted), if width is used, maxiterations is set to
+cells are deleted), if width is used, maxiterations is set to
 int(width/2). Trimming removes artificial branches which grow on the
 side of wide lines in thinnning but it also shortens a bit the real
 branches. The thinned grid must be a binary grid.
@@ -3405,7 +2908,7 @@ sub thin {
 	    $m += ral_gdapplytempl($self->{GRID}, $_, 0);
 	    print STDERR "#" unless $opt{quiet};
 	}
-	print STDERR " thinning, pass $i/$maxiterations: deleted ", $m-$M, " pixels\n" unless $opt{quiet};
+	print STDERR " thinning, pass $i/$maxiterations: deleted ", $m-$M, " cells\n" unless $opt{quiet};
 	$i++;
     } while ($m > $M and !($maxiterations > 0 and $i > $maxiterations));
     return $self if defined wantarray;
@@ -3437,7 +2940,6 @@ sub borders {
     if ($method eq 'simple') {
 	if (defined wantarray) {
 	    my $g = new Geo::Raster(ral_gdborders($self->{GRID}));
-	    copy_attributes($self,$g);
 	    return $g;
 	} else {
 	    $self->_new_grid(ral_gdborders($self->{GRID}));
@@ -3445,7 +2947,6 @@ sub borders {
     } elsif ($method eq 'recursive') {
 	if (defined wantarray) {
 	    my $g = new Geo::Raster(ral_gdborders_recursive($self->{GRID}));
-	    copy_attributes($self,$g);
 	    return $g;
 	} else {
 	    $self->_new_grid(ral_gdborders_recursive($self->{GRID}));
@@ -3477,7 +2978,6 @@ sub areas {
     $k = 3 unless $k;
     if (defined wantarray) {
 	my $g = new Geo::Raster(ral_gdareas($self->{GRID}, $k));
-	copy_attributes($self,$g);
 	return $g;
     } else {
 	$self->_new_grid(ral_gdareas($self->{GRID}, $k));
@@ -3539,153 +3039,89 @@ sub number_areas {
     }
 }
 
-
-=pod
-
-=head1 DBMS CONNECTIVITY
-
-Geo::Raster.pm maintains internally a database handle which can be 
-initialized using the method:
-
-    db_connect(\%opt, \%attr);
-
-A table in database can be used to store information about a grid.
-A database connection must be established before database methods
-can be used:
-
-    use Geo::Raster qw(:db);
-
-    db_connect({driver=>"driver",
-		hostname=>"hostname",
-		port=>"portnumber",
-		database=>"database",
-		username=>"username",
-		password=>"password"});
-
-The default driver is "Pg" (for PostgreSQL), the default hostname is
-"", the default port number is 5432 (the default of PostgreSQL), the
-default database is the current directory name (obtained with "pwd"),
-the default username is the current user (obtained with "whoami"), and
-the default password is "". 
-
-=cut
-
-sub db_connect { # \%opt, \%attr
-    my($opt, $attr) = @_;
-    $dbh->disconnect if $dbh;
-
-    $opt->{driver} = 'Pg' unless $opt->{driver};
-    $opt->{database} = dirname(`pwd`) unless $opt->{database};
-    $opt->{hostname} = 'localhost' unless $opt->{hostname};
-    $opt->{port} = '5432' unless $opt->{port};
-    $opt->{username} = `whoami` unless $opt->{username};
-    $opt->{password} = '' unless $opt->{password};
-
-    my $data_source = "dbi:$opt->{driver}:dbname=$opt->{database}";
-    $data_source .= ";host=" . $opt->{hostname} . ";port=" . $opt->{port} if $opt->{hostname};
-    $dbh = DBI->connect($data_source, $opt->{username}, $opt->{password}, $attr);
-
-    croak STDERR ("$DBI::errstr") unless $dbh;
-    return 1;
+sub color_scheme {
+    my($self,$color_scheme) = @_;
+    if (defined $color_scheme) {
+	croak "Unknown color scheme: $color_scheme" unless defined $COLOR_SCHEMES{$color_scheme};
+	$self->{COLOR_SCHEME} = $COLOR_SCHEMES{$color_scheme};
+    } else {
+	unless (defined $self->{COLOR_SCHEME}) {
+	    my $ct = $self->get_color_table(1);
+	    if ($ct->GetCount) {
+		$self->{COLOR_SCHEME} = $COLOR_SCHEMES{Colortable};
+	    } else {
+		$self->{COLOR_SCHEME} = $COLOR_SCHEMES{Grayscale};
+	    }
+	}
+	return $self->{COLOR_SCHEME};
+    }
 }
 
-=pod
-
-The database connection is closed with
-
-    db_close();
-
-=cut
-
-sub db_close {
-    $dbh->disconnect if $dbh;
-    undef $dbh;
+sub get_color_table {
+    my($self,$create_allowed) = @_;
+    return $self->{COLOR_TABLE} if $self->{COLOR_TABLE};
+    if ($self->{GDAL}) {
+	$self->{COLOR_TABLE} = $self->{GDAL}->{dataset}->GetRasterBand($self->{GDAL}->{band})->GetRasterColorTable;
+    }
+    if (!$self->{COLOR_TABLE} and $create_allowed) {
+	$self->{COLOR_TABLE} = new gdal::ColorTable;
+    }
+    return $self->{COLOR_TABLE};
 }
 
-=pod
+sub render {
+    my($self, $pb, $alpha) = @_;
 
-The subroutine 
+    my $pbw = ral_pixbuf_get_world($pb);
+    my($minX,$minY,$maxX,$maxY,$pixel_size,$w,$h) = @$pbw;
 
-    ($rows, $fields) = sql($sql, %options);
-
-is a wrapper for running SQL commands. Usage examples:
-
-    use Geo::Raster qw(:db);
-    db_connect();
-    $lu = new Geo::Raster "lu";
-    ($rows, $fields) = sql("select * from $lu->{NAME}");
-    print "@{$fields}\n";
-    foreach (@{$rows}) {print "@{$_}\n"}
-
-another:
-
-    $c = $lu->contents();
-    foreach (keys %{$c}) {
-	sql("insert into $lu->{NAME} (index,count) values ($_, $$c{$_})");
+    my $gdal = $self->{GDAL};
+    if ($gdal) {
+	$self->cache($minX,$minY,$maxX,$maxY,$pixel_size);
+	return unless $self->{GRID} and ral_gdget_height($self->{GRID});
     }
 
-These examples assume that there is a table "lu" in the database and
-that there are columns index and count in that table.
+    $alpha = $alpha->{GRID} if $alpha and ref($alpha) eq 'Geo::Raster';
+	
+    # NOTE: this scales to the view
 
-=cut
+    # draw arrows for flow direction grids (if it makes sense) 
+    if ($self->{FDG} and $self->{CELL_SIZE}/$pixel_size >= 5) {
 
-sub sql {
-    my($sql,%opt) = @_;
-    croak "not connected to a DB" unless $dbh;
-#    my $opt = $_[0] if ref($_[0]);
-#    pop @_ if $opt;
-#    my $print = ($opt and $opt->{print});
-    my $print = $opt{print};
-#    my $sql = CORE::join "\n", @_;
-#    print "$sql\n" if ($opt and $opt->{debug});
-    print "$sql\n" if $opt{debug};
-    my $sth = $dbh->prepare($sql);
-    $sth->execute;
-    if ($sql =~ /^select/i) {
-	my @fnames = @{ $sth->{NAME} };
-	print "@fnames\n" if $print;
-	my @aa;    
-	for (1..$sth->rows) {
-	    my(@a) = $sth->fetchrow_array;
-	    print "@a\n" if $print;
-	    push @aa, [ @a ];
-	}
-	$sth->finish;
-	if (wantarray()) {
-	    return (\@aa,\@fnames);
+	ral_render_fdg($pb, $self->{GRID}, 255, 0, 0, $alpha);
+
+    } else {
+
+	my $color_scheme = $self->color_scheme();
+	my $min = ($self->{PALETTE_MIN} or 0);
+	my $max = ($self->{PALETTE_MAX} or 0);
+
+	if ($self->{DATATYPE} == $INTEGER_GRID) {
+
+	    my $color_table = $self->get_color_table(1);
+
+	    ral_render_igrid($pb, $self->{GRID}, $alpha, $color_scheme, $min, $max, $color_table);
+
+	} elsif ($self->{DATATYPE} == $REAL_GRID) {
+
+	    ral_render_rgrid($pb, $self->{GRID}, $alpha, $color_scheme, $min, $max);
+
 	} else {
-	    return \@aa;
+
+	    croak("bad Geo::Raster");
+
 	}
     }
 }
 
-=pod
-
-If the table has integer columns r, g, and b we can use
-the method:
-
-    $lu->rgb(extra_colors=>extra_colors);
-
-to create a colortable into grid lu based on the r, g, and b values in
-the table lu in the database. The r, g, and b should have values in
-the range 0..255. extra_colors is the number of extra colors in the
-color table and its default is 0.
-
-=cut
-
-sub rgb {
-    my($self, %opt) = @_;
-    croak "not connected to a DB" unless $dbh;
-    my $name = $self->{NAME};
-    $name = $opt{name} if $opt{name};
-    my $a = sql("select index,r,g,b from $name order by index");
-    return if defined($a) and !$a;
-    $self->colortable(%opt);
-    foreach (@{$a}) {
-	my ($index, $r, $g, $b) = @{$_};
-	$self->color($index, $r, $g, $b);
-    }
-    return $self;
+sub save_as_image {
+    my($self, $filename, $type, $option_keys, $option_values) = @_;
+    my $b = ral_pixbuf_new_from_grid($self->{GRID});
+    $self->render($b, 255);
+    $option_keys = [] unless $option_keys;
+    $option_values = [] unless $option_values;
+    ral_pixbuf_save($b, $filename, $type, $option_keys, $option_values);
+    ral_pixbuf_delete($b);
 }
 
 =pod
@@ -3715,7 +3151,6 @@ sub aspect {
     $r = 1 unless $r;
     if (defined wantarray) {
 	my $g = new Geo::Raster(ral_dem2aspect($self->{GRID}));
-	copy_attributes($self,$g);
 	return $g;
     } else {
 	$self->_new_grid(ral_dem2aspect($self->{GRID}));
@@ -3749,7 +3184,6 @@ sub slope {
     $z_factor = 1 unless $z_factor;
     if (defined wantarray) {
 	my $g = new Geo::Raster(ral_dem2slope($self->{GRID}, $z_factor));
-	copy_attributes($self,$g);
 	return $g;
     } else {
 	$self->_new_grid(ral_dem2slope($self->{GRID}, $z_factor));
@@ -3946,19 +3380,18 @@ sub fixflats {
 	$fdg = new Geo::Raster $fdg;
 	$fdg->{FDG} = 1;
     }
-    my $ret;
     if (!$opt{method}) {
 	$opt{method} = 'one pour point';
 	print "fixflats: Warning: method not set, using '$opt{method}'\n";
     }
     if ($opt{method} =~ /^m/) {
-	$ret = ral_fdg_fixflats1($fdg->{GRID}, $dem->{GRID});
+	ral_fdg_fixflats1($fdg->{GRID}, $dem->{GRID});
     } elsif ($opt{method} =~ /^o/) {
-	$ret = ral_fdg_fixflats2($fdg->{GRID}, $dem->{GRID});
+	ral_fdg_fixflats2($fdg->{GRID}, $dem->{GRID});
     } else {
 	croak "fixflats: $opt{method}: unknown method";
     }
-    return $fdg if defined wantarray and $ret;
+    return $fdg if defined wantarray;
 }
 
 =pod
@@ -4130,12 +3563,12 @@ sub pitless_fdg {
     my $i = 1;
     my $pits_last_time = $pits+1;
     while ($pits > 0 and $pits != $pits_last_time) {
-	my $fixed = ral_fdg_fixpits($fdg->{GRID}, $dem->{GRID});
+	ral_fdg_fixpits($fdg->{GRID}, $dem->{GRID});
 	$c = $fdg->contents();
 	$pits_last_time = $pits;
 	$pits = $$c{0};
 	$pits = 0 unless defined $pits;
-	print STDERR "pitless_fdg: iteration $i: fixed $fixed depressions and $pits remain\n";
+	print STDERR "pitless_fdg: iteration $i: $pits depressions remain\n";
 	$i++;
     }
     return $fdg;
@@ -4145,9 +3578,8 @@ sub fixpits {
     my($fdg, $dem) = @_;
     croak "fixpits: no DEM supplied" unless $dem;
     $fdg = new Geo::Raster $fdg if defined wantarray;
-    my $ret;
-    $ret = ral_fdg_fixpits($fdg->{GRID}, $dem->{GRID});
-    return new Geo::Raster $fdg if defined wantarray and $ret;
+    ral_fdg_fixpits($fdg->{GRID}, $dem->{GRID});
+    return new Geo::Raster $fdg if defined wantarray;
 }
 
 
@@ -4240,8 +3672,8 @@ sub uag {
     unless ($options{fdg}) {
 	my $fdg = $self;
 	my $uag = $options{load} ? 
-	    _fdg2uag_b($fdg->{GRID}, $options{load}->{GRID}) : 
-	    _fdg2uag_a($fdg->{GRID});
+	    fdg2uag_b($fdg->{GRID}, $options{load}->{GRID}) : 
+	    fdg2uag_a($fdg->{GRID});
 
 	if (defined wantarray) {
 	    return new Geo::Raster $uag;
@@ -4261,6 +3693,11 @@ sub uag {
 	my $recursive = $options{recursive} ? 1 : 0;
 
 	my $uag = ral_dem2uag($dem->{GRID}, $fdg->{GRID}, $recursive);
+	unless ($uag) {
+	    my $msg = ral_get_error_msg() if ral_has_msg();
+	    $msg = "undefined error in ral_dem2uag" unless $msg;
+	    croak($msg);
+	}
 
 	if (defined wantarray) {
 	    return new Geo::Raster $uag;
@@ -4414,7 +3851,7 @@ sub prune {
     }
     my $j = shift;
     my $l = shift;
-    $l = 1.5*$streams->{GRID}->{UNIT_LENGTH} unless defined($l);
+    $l = 1.5*$streams->{GRID}->{CELL_SIZE} unless defined($l);
     if ($lakes) {
 	return ral_streams_prune($streams->{GRID}, $fdg->{GRID}, $lakes->{GRID}, $i, $j, $l);
     } else {
@@ -4436,13 +3873,10 @@ sub number_streams {
     my $j = shift;
     my $sid = shift;
     $sid = 1 unless defined($sid);
-    my $ret = ral_streams_number($streams->{GRID}, $fdg->{GRID}, $i, $j, $sid);
+    ral_streams_number($streams->{GRID}, $fdg->{GRID}, $i, $j, $sid);
     if ($lakes) {
 	$sid = $streams->max() + 1;
-	my $ret2 = ral_streams_break($streams->{GRID}, $fdg->{GRID}, $lakes->{GRID}, $sid);
-	return ($ret, $ret2);
-    } else {
-	return $ret;
+	ral_streams_break($streams->{GRID}, $fdg->{GRID}, $lakes->{GRID}, $sid);
     }
 }
 
@@ -4480,11 +3914,11 @@ sub subcatchments {
     $headwaters = 0 unless defined($headwaters);
     if ($lakes) {
 	my $subs = new Geo::Raster(like=>$streams);
-	my $r = _subcatchments($subs->{GRID}, 
-			       $streams->{GRID}, 
-			       $fdg->{GRID}, 
-			       $lakes->{GRID}, $i, $j, $headwaters);
-
+	my $r = ral_ws_subcatchments($subs->{GRID}, 
+				     $streams->{GRID}, 
+				     $fdg->{GRID}, 
+				     $lakes->{GRID}, $i, $j, $headwaters);
+	
 	# drainage structure:
 	# sub -> lake or stream
 	# lake -> stream
@@ -4522,6 +3956,9 @@ sub subcatchments {
     }
 }
 
+call_g_type_init();
+gdal::AllRegister;
+gdal::UseExceptions();
 
 1;
 __END__
@@ -4532,13 +3969,25 @@ __END__
 DInfinity grids can be made but otherwise the methods to handle them
 do not work.
 
+=head1 SEE ALSO
+
+gdalconst, gdal
+
+This module should be discussed in geo-perl@list.hut.fi.
+
+The homepage of this module is http://libral.sf.net.
+
 =head1 AUTHOR
 
 Ari Jolma, ari.jolma _at_ tkk.fi
 
-=head1 SEE ALSO
+=head1 COPYRIGHT AND LICENSE
 
-perl(1).
+Copyright (C) 1999-2006 by Ari Jolma
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself, either Perl version 5.8.5 or,
+at your option, any later version of Perl 5 you may have available.
 
 =cut
 

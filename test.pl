@@ -13,12 +13,9 @@ use POSIX;
 $loaded = 1;
 
 if (0) {
-    $dem = new Geo::Raster '../dem';
-#    $fdg = $dem->fdg;
-#    $fdg->fixflats($dem);
-    Geo::Raster::ral_setdebug(0);
-#    $dem->breach;
-    $fdg = $dem->pitless_fdg();
+
+    use Devel::Peek;
+
     exit;
 }
 
@@ -37,7 +34,7 @@ sub ok {
 
     if (1) {
 	print $test ? "ok" : "not ok";
-	print " $test_nr - $msg             ";
+	print " $test_nr - $msg                           ";
 	print $sub_tests ? "\r" : "\n";
     }
 
@@ -84,7 +81,8 @@ ok(1,"loaded");
     my $datatype = $REAL_GRID;
     my $gd = new Geo::Raster($datatype,5,10);
     ok(defined($gd),"simple new");
-    for ('data/dem','data/landcover') {
+    ok($gd->has_data,"has_data");
+    for ('data/dem.bil','data/landcover.bil') {
 	$gd = new Geo::Raster $_;
 	ok(defined($gd),"open",$subs);
     }
@@ -97,7 +95,7 @@ for my $datatype1 ($INTEGER_GRID,$REAL_GRID) {
     $gd1->set(5);
     ok(diff_ok($gd1->get(3,3),5),'set & get',$subs);
     for my $datatype2 (undef,$INTEGER_GRID,$REAL_GRID) {
-	my $gd2 = new Geo::Raster $gd1, $datatype2;
+	my $gd2 = new Geo::Raster copy=>$gd1, datatype=>$datatype2;
 	ok(diff_ok($gd1->get(3,3),$gd2->get(3,3)),'copy',$subs);
     }
 }
@@ -166,15 +164,17 @@ $sub_tests = 0;
 $sub_tests = 0;
 
 {
-    my $test_grid = 'test_grid';
+#  current:
+    my $test_grid = 'test_grid.bil';
     for my $datatype ($INTEGER_GRID,$REAL_GRID) {
 	my $gd1 = new Geo::Raster($datatype,5,10);
 	$gd1->set(5);
 	$gd1->save($test_grid);
-	my $gd2 = new Geo::Raster $test_grid;
-	ok(diff_ok($gd1->get(3,3),$gd2->get(3,3)),'save/open',$subs);
+	my $gd2 = new Geo::Raster filename=>$test_grid,load=>1;
+	ok(diff_ok($gd1->get(3,3),$gd2->get(3,3),$debug),'save/open',$subs);
     }
     for ('.hdr','.bil') {unlink($test_grid.$_)};
+#    exit;
     $sub_tests = 0;
 
     for my $datatype ($INTEGER_GRID,$REAL_GRID) {
@@ -190,13 +190,13 @@ $sub_tests = 0;
 
 {
     my $gd1 = new Geo::Raster($INTEGER_GRID,5,10);
-    my %bm = (1 => unit_length,
+    my %bm = (1 => cell_size,
 	      2 => minX,
 	      3 => minY,
 	      4 => maxX,
 	      5 => maxY);
     #valid bounds:
-    my %bounds = (unit_length => 1.5,
+    my %bounds = (cell_size => 1.5,
 		  minX => 3.5,
 		  minY => 2.5,
 		  maxX => 18.5,
@@ -229,7 +229,7 @@ $sub_tests = 0;
 
 {
     my $gd = new Geo::Raster($INTEGER_GRID,5,10);
-    $gd->setbounds(unit_length=>1.4,minX=>1.2,minY=>2.4);
+    $gd->setbounds(cell_size=>1.4,minX=>1.2,minY=>2.4);
     my @point = $gd->g2w(3,7);
     my @cell = $gd->w2g(@point);
     ok(($cell[0] == 3 and $cell[1] == 7),"world coordinates <-> grid coordinates");
@@ -249,7 +249,7 @@ $sub_tests = 0;
 }
 
 
-current:
+#current:
 
 # data test here
 
@@ -395,13 +395,6 @@ sub mytest {
     eval $eval;
     print $@ if $debug;
     
-    if (ref($ret) eq 'Geo::Raster') {
-	ok($ret->{NAME} eq $gd1->{NAME},"copy attr in $method",$subs);
-	if ($debug) {
-	    print "eval: $eval\n",$ret->{NAME},' ? ',$gd1->{NAME},"\n" unless $ret->{NAME} eq $gd1->{NAME};
-	}
-    }
-
     $ret = $ret->get(3,3);
     print "val = $val, (ret = $ret) == (comp = $comp)?\n" if $debug;
     ok(diff_ok($comp,$ret), "$method", $subs);
@@ -445,11 +438,11 @@ $sub_tests = 0;
 		$a->set(1);	       
 		$b->rect(2,2,4,6);
 
-		$d = $a->if_then($b,$c);
+		$d = $a->if($b,$c);
 		$s = $d->sum;
 		ok(diff_ok($s,50),"if then (else)",$subs);
 
-		$a->if_then($b,$c);
+		$a->if($b,$c);
 		$s = $a->sum;
 		ok(diff_ok($s,50),"if then (else)",$subs);
 
@@ -537,7 +530,7 @@ $sub_tests = 0;
 	$gd->set(5);
 	my $mask = new Geo::Raster(5,10);
 	$mask->circle(3,5,2,1);
-	$mask->setmask();
+	$gd->setmask($mask);
 	my %ret = (count=>9,sum=>45,mean=>5,variance=>0);
 	for ('count','sum','mean','variance') {
 	    my $ret; 
@@ -546,7 +539,7 @@ $sub_tests = 0;
 #	    print "$_ = $ret\n";
 	    ok(diff_ok($ret{$_},$ret),"masked $_",$subs);
 	}
-	$mask->removemask();
+	$gd->removemask();
     }
 }
 $sub_tests = 0;
@@ -575,17 +568,17 @@ $sub_tests = 0;
 {
     for my $datatype ($INTEGER_GRID,$REAL_GRID) {
 	my %ans = ($INTEGER_GRID=>{0=>1,mean=>1, variance=>0, min=>1, max=>1, count=>100},
-		   $REAL_GRID=>{0=>1,mean=>1, variance=>0, min=>1, max=>1, count=>'nodata'});
+		   $REAL_GRID=>{0=>1,mean=>1, variance=>0, min=>1, max=>1, count=>undef});
 	for my $pick (0,'mean', "variance", "min", "max", "count") {
 	    my $gd = new Geo::Raster($datatype,100,100);
 	    $gd->set(1);
 	    my @tr = (0, 10, 0, 0, 0, 10);
 	    $gd->transform(\@tr,10,10,$pick,1);
 	    my $ret = $gd->get(0,0);
-#	    print "\nret = $ret, $pick\n";
+#	    print "\nret = $ret =? $ans{$datatype}{$pick}, $pick\n";
 #	    $gd->print;
 	    if ($datatype==$REAL_GRID and $pick eq 'count') {
-		ok($ret eq $ans{$datatype}{$pick},"transform",$subs);
+		ok($ret eq $ans{$datatype}{$pick},"transform (real, count)",$subs);
 	    } else {
 		ok(diff_ok($ans{$datatype}{$pick},$ret),"transform",$subs);
 	    }
@@ -718,26 +711,6 @@ $sub_tests = 0;
 }
 $sub_tests = 0;
 
-# colortable get_colortable color addcolors 
-{
-    my $gd = new Geo::Raster($INTEGER_GRID,10,10);
-    $gd->set(5,5,5);
-    $gd->colortable(); # creates 6 colors
-    my $ct = $gd->get_colortable();
-    my @c1 = (10,20,30);
-    $gd->color(4,@c1);
-    $gd->addcolors(4);
-    my @c2 = $gd->color(4);
-    for (0..2) {
-	ok(diff_ok($c1[$_],$c2[$_]),"colors",$subs);
-    }
-}
-$sub_tests = 0;
-
-# begin_animate animate end_animate plot view 
-
-print STDERR "skipping graphics methods\n";
-
 if (0) {
     # png rgba test
     my $r = new Geo::Raster 100,100;
@@ -755,12 +728,7 @@ if (0) {
 
 # 
 
-# db_connect db_close sql rgb 
-
-print STDERR "skipping db methods\n";
-
 # movecell
-
 
 #current:
 
@@ -776,11 +744,13 @@ print STDERR "skipping db methods\n";
     };
     $args[1] = {};
 
-    my $dem = new Geo::Raster 'data/dem';
+    my $dem = new Geo::Raster filename=>'data/dem.bil',load=>1;
 
     my $fdg = $dem->fdg(method=>'D8');
 
     for my $method (keys %{$args[0]}) {
+
+#	print "$method\n";
 	
 	for my $cv (0..$#args) {
 	    
@@ -835,8 +805,11 @@ print STDERR "skipping db methods\n";
 		my $eval = "$lvalue\$fdg->$method($arg_list);";
 		print "eval: $eval\n" if $debug;
 		eval $eval;
-#		print $@;
-		exit if $@;
+		if ($@) {
+		    print "eval: $eval\n";
+		    print $@;
+		    exit;
+		}
 		ok(!$@,$method,$subs);
 	    }
 	}

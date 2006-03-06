@@ -1,4 +1,4 @@
-Perl Module Geo::RasterAlgebra - 0.31
+Perl Module Geo::Raster
 
      Copyright (c) 1999- Ari Jolma. All rights reserved.
      This program is free software; you can redistribute it and/or
@@ -28,9 +28,6 @@ ACKNOWLEDGEMENTS
 array.c and array.h are taken from the Karl Glazebrook's PGPLOT
 distribution.
 
-excerpts from the pgplot.doc are Copyright (c) 1983-1997 by the
-California Institute of Technology.
-
 INSTALLATION
 
 To install, unzip and untar the archive. In the directory created type
@@ -40,34 +37,30 @@ make
 make test
 make install
 
-Geo::RasterAlgebra requires the Raster Algebra Library libral. libral
+Geo::Raster requires the Raster Algebra Library libral. libral
 is at <http://sourceforge.net/projects/libral>.
 
-Required modules are ExtUtils::Depends and ExtUtils:F77 if PGPLOT is
-found.
+Required modules are ExtUtils::Depends, Statistics::Descriptive,
+gdalconst, and gdal.
 
 Documentation is in the module file and will be added onto
 perllocal.pod as usual.
 
 DESCRIPTION
 
-Geo::RasterAlgebra has three purposes/goals:
+Geo::Raster has two purposes/goals:
 
-1. To be a general purpose Perl/C tool for large 2-dimensional
-   grids or matrixes of integer and/or real numbers. Large
-   means too large/slow to handle in just Perl.
+1) To be a general purpose tool for working with geospatial raster
+data. This means "raster/map algebra" (overlaying and masking DEMs
+(Digital Elevation Models), land-use rasters, etc), spatial analyses
+(kriging, ...), extracting indices from the grids (histograms, ...),
+etc.
 
-2. To be a general purpose Perl/C tool for doing raster GIS
-   (Geographic Information System) work. This means "raster/map
-   algebra" (overlaying and masking DEMs (Digital Elevation Models),
-   land-use rasters, etc), spatial analyses (kriging, ...), 
-   extracting indices from the grids (histograms, ...), etc
-
-3. To be a general purpose Perl/C tool for doing hydrologic and
-   water resources GIS work. This means watershed delineation,
-   finding stream networks, calculating indices (topographic
-   index, ...), preparing data for hydrologic models,
-   developing spatially distributed hydrologic modeling, etc.
+2) To be a general purpose Perl/C tool for doing hydrologic and water
+resources GIS work. This means watershed delineation, finding stream
+networks, calculating indices (topographic index, ...), preparing data
+for hydrologic models, developing spatially distributed hydrologic
+modeling, etc.
 
 The small script rash.pl uses Term::ReadLine and is used to implement
 a simple but very useful environment for "doing raster algebra GIS
@@ -76,7 +69,4 @@ Postgres (if invoked with option -a), this is on a basic level now,
 for example histograms are simple to plot and rgb values for a grid
 can be retrieved from a database.
 
-For a GUI (with a CLI capability) look for Gtk2::Ex::Geo also in CPAN.
-
-Geo::Raster is an interface to the libral code and then some.
-
+Gtk2::Ex::Geo is a GUI (with a CLI capability) for Geo::Raster

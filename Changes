@@ -110,3 +110,8 @@ Revision history for Perl extension Geo::RasterAlgebra, formerly (Grid).
 	- lots of tests and bug fixes
 0.31 relesed Apr 23 2005
 	- improving the 0.3
+0.40 released Oct 2005
+	- removed support for PGPLOT, databases, colortable, PPM, ...
+	- added support for GDAL, Gtk2, ...
+0.41 release Mar 6 2006
+0.42 release Mar 6 2006

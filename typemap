@@ -1,18 +1,17 @@
 TYPEMAP
-	grid * T_PTROBJ
-	cell * T_PTROBJ
-	point * T_PTROBJ
-	color_table * T_PTROBJ
-	vector_data * T_PTROBJ
-	point_data * T_PTROBJ
-	lseg_data * T_PTROBJ
-	polygon_data * T_PTROBJ
+	ral_grid * T_PTROBJ
+	ral_cell * T_PTROBJ
+	ral_point * T_PTROBJ
+	ral_geometry * T_PTROBJ
+	ral_pixbuf * T_PTROBJ
 	double * T_DOUBLEP
 	int * T_INTP
-	INTEGER T_IV
-	REAL T_FLOAT
-	REAL * T_FLOATP
-	INTEGER * T_SHORTP
+	RAL_INTEGER T_IV
+	RAL_INTEGER * T_SHORTP
+	RAL_REAL T_FLOAT
+	RAL_REAL * T_FLOATP
+	GDALDatasetH T_PTROBJ
+	GDALColorTableH T_PTROBJ
 
 INPUT
 
