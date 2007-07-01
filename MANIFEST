@@ -4,10 +4,21 @@ Copying			The GNU General Public License
 MANIFEST		This file
 README
 TODO
-Raster.pm
+lib/Geo/Raster.pm
+lib/Geo/Layer.pm
+lib/Geo/Raster/Algorithms.pm
+lib/Geo/Raster/Geostatistics.pm
+lib/Geo/Raster/IO.pm
+lib/Geo/Raster/Image.pm
+lib/Geo/Raster/TerrainAnalysis.pm
 Raster.xs
 Makefile.PL
-test.pl
+t/00_basic.t
+t/01_operators.t
+t/02_global.t
+t/03_drawing.t
+t/04_algorithms.t
+t/05_hydrology.t
 typemap
 arrays.c
 arrays.h

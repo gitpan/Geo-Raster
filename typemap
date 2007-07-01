@@ -4,6 +4,8 @@ TYPEMAP
 	ral_point * T_PTROBJ
 	ral_geometry * T_PTROBJ
 	ral_pixbuf * T_PTROBJ
+	ral_integer_grid_layer * T_PTROBJ
+	ral_real_grid_layer * T_PTROBJ
 	double * T_DOUBLEP
 	int * T_INTP
 	RAL_INTEGER T_IV

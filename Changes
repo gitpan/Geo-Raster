@@ -115,3 +115,8 @@ Revision history for Perl extension Geo::RasterAlgebra, formerly (Grid).
 	- added support for GDAL, Gtk2, ...
 0.41 release Mar 6 2006
 0.42 release Mar 6 2006
+0.50 release Oct 30 2006
+0.61 release Jul 1 2007
+	- use with libral 0.61
+	- split into several files
+	- moved all GUI code into Gtk2::Ex::Geo::Raster
