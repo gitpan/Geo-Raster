@@ -30,10 +30,7 @@ for my $e ('dbf','prj','shp','shx') {
 	  skip 'No Geo::Vector', 1;
       }
     } else {
-	my $vector = $grid->vectorize(driver=>'ESRI Shapefile',datasource=>'.',layer=>'v_test');
-	for my $e ('dbf','prj','shp','shx') {
-	    unlink "v_test.$e";
-	}
+	my $vector = $grid->polygonize();
     }
 }
 
@@ -56,8 +53,6 @@ for my $e ('dbf','prj','shp','shx') {
 
     for my $datatype ('int','real') {
 
-	my $gd = new Geo::Raster($datatype,10,10);
-	$gd->set(2,2,3);
 	for my $method ('ca_step','grow_zones','interpolate','dijkstra','map','neighbors',
 			'colored_map','applytempl','thin','borders','areas','connect','number_areas') {
 
@@ -65,6 +60,9 @@ for my $e ('dbf','prj','shp','shx') {
 	    next if $method eq 'applytempl';
 	    next if $method eq 'thin';
 	    next if $datatype eq 'real' and !$for_real{$method};
+
+	    my $gd = new Geo::Raster($datatype,10,10);
+	    $gd->set(2,2,3);
 	    
 	    for my $cv (0,1) {
 
@@ -89,7 +87,7 @@ for my $e ('dbf','prj','shp','shx') {
 		    $lvalue = '$lvalue=' if $_;
 		    my $eval = "$lvalue\$gd->$method($arg_list);";
 		    eval $eval;
-		    ok(!$@,$method);
+		    ok(!$@, "$method, $@");
 		}
 	    }
 	}

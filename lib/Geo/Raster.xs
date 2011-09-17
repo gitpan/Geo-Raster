@@ -8,6 +8,8 @@ extern "C" {
 }
 #endif
 
+#include <gtk2-ex-geo.h>
+
 #include <ral.h>
 
 #include "arrays.h"   /* Pack functions decs */
@@ -16,117 +18,9 @@ extern "C" {
 #define RAL_GRIDPTR "ral_gridPtr"
 #define RAL_ERRSTR_OOM "Out of memory"
 
-IV SV2Handle(SV *sv)
-{
-	if (SvGMAGICAL(sv))
-		mg_get(sv);
-	if (!sv_isobject(sv))
-		croak("parameter is not an object");
-	SV *tsv = (SV*)SvRV(sv);
-	if ((SvTYPE(tsv) != SVt_PVHV))
-		croak("parameter is not a hashref");
-	if (!SvMAGICAL(tsv))
-		croak("parameter does not have magic");
-	MAGIC *mg = mg_find(tsv,'P');
-	if (!mg)
-		croak("parameter does not have right kind of magic");
-	sv = mg->mg_obj;
-	if (!sv_isobject(sv))
-		croak("parameter does not have really right kind of magic");
-	return SvIV((SV*)SvRV(sv));
-}
-
-IV SV2Object(SV *sv, char *stash)
-{
-	if (!sv_isobject(sv)) {
-		croak("parameter is not an object");
-		return 0;
-	}
-	sv = (SV*)SvRV(sv);
-	if (strcmp(stash,HvNAME((HV*)SvSTASH(sv)))!=0) {
-		croak("parameter is not a %s",stash);
-		return 0;
-	}
-	return SvIV(sv);
-}
-
-GDALColorEntry fetch_color(AV *a, int i)
-{
-	GDALColorEntry color;
-	SV **s = av_fetch(a, i++, 0);
-	color.c1 = s ? SvUV(*s) : 0;
-	s = av_fetch(a, i++, 0);
-	color.c2 = s ? SvUV(*s) : 0;
-	s = av_fetch(a, i++, 0);
-	color.c3 = s ? SvUV(*s) : 0;
-	s = av_fetch(a, i++, 0);
-	color.c4 = s ? SvUV(*s) : 0;
-	return color;
-}
-
-#define RAL_FETCH(from, key, to, as) \
-{SV **s = hv_fetch(from, key, strlen(key), 0);\
- if (s) {\
-	(to) = as(*s);\
-}}
-
-/* convert a focal area expressed as an array of arrays into a simple int array 
-   the focal area is a M x M square, where M is an odd number and the center of the
-   square is the cell of interest 
-   d is defined by 2*d+1 = M
-   the length of the returned array is M x M
-   M is >= 1
-*/
-int *focal2mask(AV *focal, int *d, int defined_is_enough)
-{
-	int *mask = NULL;
-	int i, j, m = av_len(focal)+1, M = -1, ix;
-	/* get the M */
-	for (i = 0; i < m; i++) {
-		SV **s = av_fetch(focal, i, 0);
-		RAL_CHECKM(SvROK(*s) AND SvTYPE(SvRV(*s)) == SVt_PVAV, 
-				"the focal area parameter must be a reference to an array of arrays");
-		M = M < 0 ? av_len((AV*)SvRV(*s))+1 : max(M, av_len((AV*)SvRV(*s))+1);
-	}
-	M = max(max(m, M), 1);
-	*d = (M-1)/2;
-	M = 2*(*d)+1;
-	ix = 0;
-	SV *sv;
-	RAL_CHECKM(mask = (int *)calloc(M*M, sizeof(int)), RAL_ERRSTR_OOM);
-	for (i = 0; i < M; i++) {
-		if (i < m) {
-			SV **s = av_fetch(focal, i, 0);
-			int n = av_len((AV*)SvRV(*s))+1;
-			for (j = 0; j < M; j++) {
-				if (j < n) {
-					SV **t = av_fetch((AV*)SvRV(*s), j, 0);
-					if (t AND *t AND SvOK(*t)) {
-						if (defined_is_enough)
-							mask[ix] = 1;
-						else
-							mask[ix] = SvIV(*t) ? 1 : 0;
-					} else
-						mask[ix] = 0;
-				} else
-					mask[ix] = 0;
-				ix++;
-			}
-		} else 
-			for (j = 0; j < M; j++) {
-				mask[ix] = 0;
-				ix++;
-			}
-	}
-	return mask;
-	fail:
-		if(mask) free(mask);
-		return NULL;
-}
-
+#include "help.c"
 
 MODULE = Geo::Raster		PACKAGE = Geo::Raster
-
 
 void
 call_g_type_init()
@@ -139,107 +33,11 @@ ral_has_msg()
 char *
 ral_get_msg()
 
-ral_pixbuf *
-ral_pixbuf_create(width, height, minX, maxY, pixel_size, bgc1, bgc2, bgc3, bgc4)
-	int width
-	int height
-	double minX
-	double maxY
-	double pixel_size
-	int bgc1
-	int bgc2
-	int bgc3
-	int bgc4
-	CODE:
-		GDALColorEntry background = {bgc1, bgc2, bgc3, bgc4};
-		ral_pixbuf *pb = ral_pixbuf_create(width, height, minX, maxY, pixel_size, background);
-		RETVAL = pb;
-  OUTPUT:
-    RETVAL
-	POSTCALL:
-		if (ral_has_msg())
-			croak(ral_get_msg());
-
-ral_pixbuf *
-ral_pixbuf_create_from_grid(gd)
-	ral_grid *gd
-	POSTCALL:
-		if (ral_has_msg())
-			croak(ral_get_msg());
-
-void 
-ral_pixbuf_destroy(pb)
-	ral_pixbuf *pb
-	CODE:
-	ral_pixbuf_destroy(&pb);
-
-void
-ral_pixbuf_save(pb, filename, type, option_keys, option_values)
-	ral_pixbuf *pb
-	const char *filename
-	const char *type
-	AV* option_keys
-	AV* option_values
-	CODE:
-		GdkPixbuf *gpb;
-		GError *error = NULL;
-		int i;
-		char **ok = NULL;
-		char **ov = NULL;
-		int size = av_len(option_keys)+1;
-		gpb = ral_gdk_pixbuf(pb);
-		RAL_CHECKM(ok = (char **)calloc(size, sizeof(char *)), RAL_ERRSTR_OOM);
-		RAL_CHECKM(ov = (char **)calloc(size, sizeof(char *)), RAL_ERRSTR_OOM);
-		for (i = 0; i < size; i++) {
-			STRLEN len;
-			SV **s = av_fetch(option_keys, i, 0);
-			ok[i] = SvPV(*s, len);
-			s = av_fetch(option_values, i, 0);
-			ov[i] = SvPV(*s, len);
-		}
-		gdk_pixbuf_savev(gpb, filename, type, ok, ov, &error);
-		fail:
-		if (ok) {
-			for (i = 0; i < size; i++) {
-				if (ok[i]) free (ok[i]);
-			}
-			free(ok);
-		}
-		if (ov) {
-			for (i = 0; i < size; i++) {
-				if (ov[i]) free (ov[i]);
-			}
-			free(ov);
-		}
-		if (error) {
-			croak(error->message);
-			g_error_free(error);
-		}
-	POSTCALL:
-		if (ral_has_msg())
-			croak(ral_get_msg());
-
-AV *
-ral_pixbuf_get_world(pb)
-	ral_pixbuf *pb
-	CODE:
-		AV *av = (AV *)sv_2mortal((SV*)newAV());
-		av_push(av, newSVnv(pb->world.min.x));
-		av_push(av, newSVnv(pb->world.min.y));
-		av_push(av, newSVnv(pb->world.max.x));
-		av_push(av, newSVnv(pb->world.max.y));
-		av_push(av, newSVnv(pb->pixel_size));
-		av_push(av, newSViv(pb->N));
-		av_push(av, newSViv(pb->M));
-		RETVAL = av;
-  OUTPUT:
-    RETVAL
-
 ral_cell *
 ral_cell_create()
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_cell_destroy(c)
@@ -248,16 +46,77 @@ ral_cell_destroy(c)
 	ral_cell_destroy(&c);
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
+
+char *
+ral_data_element_type(gd)
+	ral_grid *gd
+	CODE:
+		switch(gd->datatype) {
+		case RAL_INTEGER_GRID: RETVAL = RAL_INTEGER_TYPE_NAME;
+		break;
+		case RAL_REAL_GRID: RETVAL = RAL_REAL_TYPE_NAME;
+		break;
+		default: RETVAL = "";
+		break;
+		}
+	OUTPUT:
+		RETVAL
+
+int
+ral_sizeof_data_element(gd)
+	ral_grid *gd
+	CODE:
+		switch(gd->datatype) {
+		case RAL_INTEGER_GRID: RETVAL = sizeof(RAL_INTEGER)*CHAR_BIT;
+		break;
+		case RAL_REAL_GRID: RETVAL = sizeof(RAL_REAL)*CHAR_BIT;
+		break;
+		default: RETVAL = 0;
+		break;
+		}
+	OUTPUT:
+		RETVAL
+
+long
+ral_pointer_to_data(gd)
+	ral_grid *gd
+	CODE:
+		RETVAL = (long)(gd->data);
+	OUTPUT:
+		RETVAL
 
 void
 ral_grid_set_mask(gd, mask)
 	ral_grid *gd
 	ral_grid *mask
-
+    
 void
 ral_grid_clear_mask(gd)
 	ral_grid *gd
+    
+void
+pdl2grid(SV *datasv, int datatype, ral_grid *gd)
+	CODE:
+		void *x = SvPV_nolen(SvRV(datasv));
+		int i,j;
+		if (gd->datatype == RAL_INTEGER_GRID) {
+		for (i = 0; i < gd->M; i++) for (j = 0; j < gd->N; j++) {
+		    int ii = j+gd->N*i;
+		    int pi = j+gd->N*(gd->M-i-1);
+		    ((RAL_INTEGER*)(gd->data))[ii] = int_from_pdl(x, datatype, pi);
+		}} else {
+		for (i = 0; i < gd->M; i++) for (j = 0; j < gd->N; j++) {
+		    int ii = j+gd->N*i;
+		    int pi = j+gd->N*(gd->M-i-1);
+		    ((RAL_REAL*)(gd->data))[ii] = real_from_pdl(x, datatype, pi);
+		}}
+
+void
+ral_grid_flip_horizontal(ral_grid *gd)
+
+void
+ral_grid_flip_vertical(ral_grid *gd)
 
 ral_grid *
 ral_grid_get_mask(gd)
@@ -270,7 +129,7 @@ ral_grid_create(datatype, M, N)
 	int N
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 ral_grid *
 ral_grid_create_like(gd, datatype)
@@ -278,7 +137,7 @@ ral_grid_create_like(gd, datatype)
 	int datatype
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 			
 
 ral_grid *
@@ -287,7 +146,7 @@ ral_grid_create_copy(gd, datatype)
 	int datatype
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 void
 ral_grid_destroy(gd)
@@ -316,7 +175,7 @@ ral_grid_create_using_GDAL(dataset, band, clip_xmin, clip_ymin, clip_xmax, clip_
 		RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_write(gd, filename)
@@ -324,7 +183,7 @@ ral_grid_write(gd, filename)
 	char *filename
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 int
 ral_grid_get_height(gd)
@@ -364,7 +223,7 @@ ral_grid_get_nodata_value(gd)
     RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_set_nodata_value(gd, x)
@@ -378,7 +237,7 @@ ral_grid_set_nodata_value(gd, x)
 				if (i >= RAL_INTEGER_MIN AND i <= RAL_INTEGER_MAX)
 					ral_grid_set_integer_nodata_value(gd, i);
 				else
-					croak("ral_grid_set_nodata_value(%i): int out of bounds", i);
+					croak("%s","ral_grid_set_nodata_value(%i): int out of bounds", i);
 			}
 			break;
 		case RAL_REAL_GRID:
@@ -387,7 +246,7 @@ ral_grid_set_nodata_value(gd, x)
 		}
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 void 
 ral_grid_remove_nodata_value(gd)
@@ -419,6 +278,9 @@ ral_grid_get_world(gd)
 	}
   OUTPUT:
     RETVAL
+
+int
+ral_grid_overlayable(ral_grid *g1, ral_grid *g2)
 
 void
 ral_grid_set_bounds_csnn(gd, cell_size, minX, minY)
@@ -577,7 +439,7 @@ ral_grid_set(gd, ci, cj, x)
 				if (i >= RAL_INTEGER_MIN AND i <= RAL_INTEGER_MAX)
 					ral_grid_set_integer(gd, c, i);
 				else
-					croak("ral_grid_set_integer(cell, %i): int out of bounds", i);
+					croak("%s","ral_grid_set_integer(cell, %i): int out of bounds", i);
 			}
 			break;
 		case RAL_REAL_GRID:
@@ -588,7 +450,7 @@ ral_grid_set(gd, ci, cj, x)
 	}
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 void
 ral_grid_set_nodata(gd, ci, cj)
@@ -602,7 +464,7 @@ ral_grid_set_nodata(gd, ci, cj)
 	}
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 AV *
 ral_grid_get_value_range(gd)
@@ -646,7 +508,7 @@ ral_grid_set_all(gd, x)
 				if (i >= RAL_INTEGER_MIN AND i <= RAL_INTEGER_MAX)
 					ral_grid_set_all_integer(gd, i);
 				else
-					croak("ral_grid_set_all_integer(%i): int out of bounds", i);
+					croak("%s","ral_grid_set_all_integer(%i): int out of bounds", i);
 			}
 			break;
 		case RAL_REAL_GRID:
@@ -655,14 +517,14 @@ ral_grid_set_all(gd, x)
 		}
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_set_all_nodata(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 void 
 ral_grid_set_focal(gd, ci, cj, focal)
@@ -725,7 +587,7 @@ ral_grid_set_focal(gd, ci, cj, focal)
 	}
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 AV *
 ral_grid_get_focal(gd, ci, cj, distance)
@@ -773,7 +635,7 @@ ral_grid_get_focal(gd, ci, cj, distance)
 		RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 SV *
 ral_grid_focal_sum(gd, ci, cj, focal)
@@ -805,7 +667,7 @@ ral_grid_focal_sum(gd, ci, cj, focal)
 		RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 SV *
 ral_grid_focal_mean(gd, ci, cj, focal)
@@ -831,7 +693,7 @@ ral_grid_focal_mean(gd, ci, cj, focal)
 		RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 SV *
 ral_grid_focal_variance(gd, ci, cj, focal)
@@ -857,7 +719,7 @@ ral_grid_focal_variance(gd, ci, cj, focal)
 		RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 SV *
 ral_grid_focal_count(gd, ci, cj, focal)
@@ -882,7 +744,7 @@ ral_grid_focal_count(gd, ci, cj, focal)
 		RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 SV *
 ral_grid_focal_count_of(gd, ci, cj, focal, of)
@@ -908,7 +770,7 @@ ral_grid_focal_count_of(gd, ci, cj, focal, of)
 		RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 AV *
 ral_grid_focal_range(gd, ci, cj, focal)
@@ -953,7 +815,7 @@ ral_grid_focal_range(gd, ci, cj, focal)
 		RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 double
 ral_grid_convolve(gd, ci, cj, kernel)
@@ -965,42 +827,9 @@ ral_grid_convolve(gd, ci, cj, kernel)
 	{
 		ral_cell c = {ci, cj};
 		double *_kernel = NULL;
-		int i, j, m = av_len(kernel)+1, M = -1, ix, d;
-		/* get the M */
-		for (i = 0; i < m; i++) {
-			SV **s = av_fetch(kernel, i, 0);
-			RAL_CHECKM(SvROK(*s) AND SvTYPE(SvRV(*s)) == SVt_PVAV, 
-					"the kernel parameter must be a reference to an array of arrays");
-			M = M < 0 ? av_len((AV*)SvRV(*s))+1 : max(M, av_len((AV*)SvRV(*s))+1);
-		}
-		M = max(max(m, M), 1);
-		d = (M-1)/2;
-		M = 2*d+1;
-		ix = 0;
-		SV *sv;
-		RAL_CHECKM(_kernel = (double *)calloc(M*M, sizeof(double)), RAL_ERRSTR_OOM);
-		for (i = 0; i < M; i++) {
-			if (i < m) {
-				SV **s = av_fetch(kernel, i, 0);
-				int n = av_len((AV*)SvRV(*s))+1;
-				for (j = 0; j < M; j++) {
-					if (j < n) {
-						SV **t = av_fetch((AV*)SvRV(*s), j, 0);
-						if (t AND *t AND SvOK(*t)) {
-							_kernel[ix] = SvNV(*t);
-						} else
-							_kernel[ix] = 0;
-					} else
-						_kernel[ix] = 0;
-					ix++;
-				}
-			} else 
-				for (j = 0; j < M; j++) {
-					_kernel[ix] = 0;
-					ix++;
-				}
-		}
+		int d;
 		double g;
+		RAL_CHECK(_kernel = focal2maskd(kernel, &d, 0));
 		ral_grid_convolve(gd, c, _kernel, d, &g);
 		fail:
 		if (_kernel) free(_kernel);
@@ -1028,7 +857,7 @@ ral_grid_focal_sum_grid(gd, focal)
 		RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 ral_grid *
 ral_grid_focal_mean_grid(gd, focal)
@@ -1049,7 +878,7 @@ ral_grid_focal_mean_grid(gd, focal)
 		RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 ral_grid *
 ral_grid_focal_variance_grid(gd, focal)
@@ -1070,7 +899,7 @@ ral_grid_focal_variance_grid(gd, focal)
 		RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 ral_grid *
 ral_grid_focal_count_grid(gd, focal)
@@ -1091,7 +920,7 @@ ral_grid_focal_count_grid(gd, focal)
 		RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 ral_grid *
 ral_grid_focal_count_of_grid(gd, focal, value)
@@ -1113,7 +942,57 @@ ral_grid_focal_count_of_grid(gd, focal, value)
 		RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
+
+ral_grid *
+ral_grid_spread(grid, mask)
+	ral_grid *grid
+	AV *mask
+	CODE:
+	{
+		double *_mask = NULL;
+		int i, d;
+		double s = 0;
+		RAL_CHECK(_mask = focal2maskd(mask, &d, 0));
+		for (i = 0; i < (2*d+1)*(2*d+1); i++)
+		    s += _mask[i];
+		for (i = 0; i < (2*d+1)*(2*d+1); i++)
+		    _mask[i] /= s;
+		ral_grid *ret = ral_grid_spread(grid, _mask, d);
+		fail:
+		if (_mask) free(_mask);
+		RETVAL = ret;
+	}
+	OUTPUT:
+		RETVAL
+	POSTCALL:
+		if (ral_has_msg())
+			croak("%s",ral_get_msg());
+
+ral_grid *
+ral_grid_spread_random(grid, mask)
+	ral_grid *grid
+	AV *mask
+	CODE:
+	{
+		double *_mask = NULL;
+		int i, d;
+		double s = 0;
+		RAL_CHECK(_mask = focal2maskd(mask, &d, 0));
+		for (i = 0; i < (2*d+1)*(2*d+1); i++)
+		    s += _mask[i];
+		for (i = 0; i < (2*d+1)*(2*d+1); i++)
+		    _mask[i] /= s;
+		ral_grid *ret = ral_grid_spread_random(grid, _mask, d);
+		fail:
+		if (_mask) free(_mask);
+		RETVAL = ret;
+	}
+	OUTPUT:
+		RETVAL
+	POSTCALL:
+		if (ral_has_msg())
+			croak("%s",ral_get_msg());
 
 ral_grid *
 ral_grid_convolve_grid(gd, kernel)
@@ -1122,41 +1001,8 @@ ral_grid_convolve_grid(gd, kernel)
 	CODE:
 	{
 		double *_kernel = NULL;
-		int i, j, m = av_len(kernel)+1, M = -1, ix, d;
-		/* get the M */
-		for (i = 0; i < m; i++) {
-			SV **s = av_fetch(kernel, i, 0);
-			RAL_CHECKM(SvROK(*s) AND SvTYPE(SvRV(*s)) == SVt_PVAV, 
-					"the kernel parameter must be a reference to an array of arrays");
-			M = M < 0 ? av_len((AV*)SvRV(*s))+1 : max(M, av_len((AV*)SvRV(*s))+1);
-		}
-		M = max(max(m, M), 1);
-		d = (M-1)/2;
-		M = 2*d+1;
-		ix = 0;
-		SV *sv;
-		RAL_CHECKM(_kernel = (double *)calloc(M*M, sizeof(double)), RAL_ERRSTR_OOM);
-		for (i = 0; i < M; i++) {
-			if (i < m) {
-				SV **s = av_fetch(kernel, i, 0);
-				int n = av_len((AV*)SvRV(*s))+1;
-				for (j = 0; j < M; j++) {
-					if (j < n) {
-						SV **t = av_fetch((AV*)SvRV(*s), j, 0);
-						if (t AND *t AND SvOK(*t)) {
-							_kernel[ix] = SvNV(*t);
-						} else
-							_kernel[ix] = 0;
-					} else
-						_kernel[ix] = 0;
-					ix++;
-				}
-			} else 
-				for (j = 0; j < M; j++) {
-					_kernel[ix] = 0;
-					ix++;
-				}
-		}
+		int d;
+		RAL_CHECK(_kernel = focal2maskd(kernel, &d, 0));
 		ral_grid *g = NULL;
 		g = ral_grid_convolve_grid(gd, _kernel, d);
 		fail:
@@ -1171,14 +1017,14 @@ ral_grid_data(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_not(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_and_grid(gd1, gd2)
@@ -1186,7 +1032,7 @@ ral_grid_and_grid(gd1, gd2)
 	ral_grid *gd2
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_or_grid(gd1, gd2)
@@ -1194,7 +1040,7 @@ ral_grid_or_grid(gd1, gd2)
 	ral_grid *gd2
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_add_real(gd, x)
@@ -1202,7 +1048,7 @@ ral_grid_add_real(gd, x)
 	RAL_REAL x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_add_integer(gd, x)
@@ -1210,7 +1056,7 @@ ral_grid_add_integer(gd, x)
 	RAL_INTEGER x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_add_grid(gd1, gd2)
@@ -1218,7 +1064,7 @@ ral_grid_add_grid(gd1, gd2)
 	ral_grid *gd2
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_sub_grid(gd1, gd2)
@@ -1226,7 +1072,7 @@ ral_grid_sub_grid(gd1, gd2)
 	ral_grid *gd2
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_mult_real(gd, x)
@@ -1234,7 +1080,7 @@ ral_grid_mult_real(gd, x)
 	RAL_REAL x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_mult_integer(gd, x)
@@ -1242,7 +1088,7 @@ ral_grid_mult_integer(gd, x)
 	RAL_INTEGER x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_mult_grid(gd1, gd2)
@@ -1250,7 +1096,7 @@ ral_grid_mult_grid(gd1, gd2)
 	ral_grid *gd2
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_div_real(gd, x)
@@ -1258,7 +1104,7 @@ ral_grid_div_real(gd, x)
 	RAL_REAL x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_div_integer(gd, x)
@@ -1266,7 +1112,7 @@ ral_grid_div_integer(gd, x)
 	RAL_INTEGER x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_real_div_grid(x, gd)
@@ -1274,7 +1120,7 @@ ral_real_div_grid(x, gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_integer_div_grid(x, gd)
@@ -1282,7 +1128,7 @@ ral_integer_div_grid(x, gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_div_grid(gd1, gd2)
@@ -1290,7 +1136,7 @@ ral_grid_div_grid(gd1, gd2)
 	ral_grid *gd2
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_modulus_integer(gd, x)
@@ -1298,7 +1144,7 @@ ral_grid_modulus_integer(gd, x)
 	RAL_REAL x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_integer_modulus_grid(x, gd)
@@ -1306,7 +1152,7 @@ ral_integer_modulus_grid(x, gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_modulus_grid(gd1, gd2)
@@ -1314,7 +1160,7 @@ ral_grid_modulus_grid(gd1, gd2)
 	ral_grid *gd2
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_power_real(gd, x)
@@ -1322,7 +1168,7 @@ ral_grid_power_real(gd, x)
 	RAL_REAL x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_real_power_grid(x, gd)
@@ -1330,7 +1176,7 @@ ral_real_power_grid(x, gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_power_grid(gd1, gd2)
@@ -1338,28 +1184,28 @@ ral_grid_power_grid(gd1, gd2)
 	ral_grid *gd2
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_abs(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_acos(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_atan(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_atan2(gd1, gd2)
@@ -1367,98 +1213,98 @@ ral_grid_atan2(gd1, gd2)
 	ral_grid *gd2
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_ceil(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_cos(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_cosh(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_exp(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_floor(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_log(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_log10(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_sin(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_sinh(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_sqrt(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_tan(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_tanh(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 ral_grid *
 ral_grid_round(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 			
 
 NO_OUTPUT int
@@ -1467,7 +1313,7 @@ ral_grid_lt_real(gd, x)
 	RAL_REAL x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_gt_real(gd, x)
@@ -1475,7 +1321,7 @@ ral_grid_gt_real(gd, x)
 	RAL_REAL x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_le_real(gd, x)
@@ -1483,7 +1329,7 @@ ral_grid_le_real(gd, x)
 	RAL_REAL x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_ge_real(gd, x)
@@ -1491,7 +1337,7 @@ ral_grid_ge_real(gd, x)
 	RAL_REAL x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_eq_real(gd, x)
@@ -1499,7 +1345,7 @@ ral_grid_eq_real(gd, x)
 	RAL_REAL x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_ne_real(gd, x)
@@ -1507,7 +1353,7 @@ ral_grid_ne_real(gd, x)
 	RAL_REAL x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_cmp_real(gd, x)
@@ -1515,7 +1361,7 @@ ral_grid_cmp_real(gd, x)
 	RAL_REAL x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_lt_integer(gd, x)
@@ -1523,7 +1369,7 @@ ral_grid_lt_integer(gd, x)
 	RAL_INTEGER x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_gt_integer(gd, x)
@@ -1531,7 +1377,7 @@ ral_grid_gt_integer(gd, x)
 	RAL_INTEGER x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_le_integer(gd, x)
@@ -1539,7 +1385,7 @@ ral_grid_le_integer(gd, x)
 	RAL_INTEGER x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_ge_integer(gd, x)
@@ -1547,7 +1393,7 @@ ral_grid_ge_integer(gd, x)
 	RAL_INTEGER x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_eq_integer(gd, x)
@@ -1555,7 +1401,7 @@ ral_grid_eq_integer(gd, x)
 	RAL_INTEGER x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_ne_integer(gd, x)
@@ -1563,7 +1409,7 @@ ral_grid_ne_integer(gd, x)
 	RAL_INTEGER x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_cmp_integer(gd, x)
@@ -1571,7 +1417,7 @@ ral_grid_cmp_integer(gd, x)
 	RAL_INTEGER x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_lt_grid(gd1, gd2)
@@ -1579,7 +1425,7 @@ ral_grid_lt_grid(gd1, gd2)
 	ral_grid *gd2
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_gt_grid(gd1, gd2)
@@ -1587,7 +1433,7 @@ ral_grid_gt_grid(gd1, gd2)
 	ral_grid *gd2
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_le_grid(gd1, gd2)
@@ -1595,7 +1441,7 @@ ral_grid_le_grid(gd1, gd2)
 	ral_grid *gd2
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_ge_grid(gd1, gd2)
@@ -1603,7 +1449,7 @@ ral_grid_ge_grid(gd1, gd2)
 	ral_grid *gd2
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_eq_grid(gd1, gd2)
@@ -1611,7 +1457,7 @@ ral_grid_eq_grid(gd1, gd2)
 	ral_grid *gd2
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_ne_grid(gd1, gd2)
@@ -1619,7 +1465,7 @@ ral_grid_ne_grid(gd1, gd2)
 	ral_grid *gd2
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_cmp_grid(gd1, gd2)
@@ -1627,7 +1473,7 @@ ral_grid_cmp_grid(gd1, gd2)
 	ral_grid *gd2
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_min_real(gd, x)
@@ -1635,7 +1481,7 @@ ral_grid_min_real(gd, x)
 	RAL_REAL x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_min_integer(gd, x)
@@ -1643,7 +1489,7 @@ ral_grid_min_integer(gd, x)
 	RAL_INTEGER x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_max_real(gd, x)
@@ -1651,7 +1497,7 @@ ral_grid_max_real(gd, x)
 	RAL_REAL x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_max_integer(gd, x)
@@ -1659,7 +1505,7 @@ ral_grid_max_integer(gd, x)
 	RAL_INTEGER x
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_min_grid(gd1, gd2)
@@ -1667,7 +1513,7 @@ ral_grid_min_grid(gd1, gd2)
 	ral_grid *gd2
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_max_grid(gd1, gd2)
@@ -1675,7 +1521,10 @@ ral_grid_max_grid(gd1, gd2)
 	ral_grid *gd2
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
+
+void
+ral_grid_random(ral_grid *gd)
 
 ral_grid *
 ral_grid_cross(a, b)
@@ -1683,7 +1532,7 @@ ral_grid_cross(a, b)
 	ral_grid *b
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 			
 
 NO_OUTPUT int
@@ -1693,7 +1542,7 @@ ral_grid_if_then_real(a, b, c)
 	RAL_REAL c
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_if_then_integer(a, b, c)
@@ -1702,7 +1551,7 @@ ral_grid_if_then_integer(a, b, c)
 	RAL_INTEGER c
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_if_then_else_real(a, b, c, d)
@@ -1712,7 +1561,7 @@ ral_grid_if_then_else_real(a, b, c, d)
 	RAL_REAL d
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_if_then_else_integer(a, b, c, d)
@@ -1722,7 +1571,7 @@ ral_grid_if_then_else_integer(a, b, c, d)
 	RAL_INTEGER d
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_if_then_grid(a, b, c)
@@ -1731,7 +1580,7 @@ ral_grid_if_then_grid(a, b, c)
 	ral_grid *c
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_zonal_if_then_real(a, b, k, v, n)
@@ -1742,7 +1591,7 @@ ral_grid_zonal_if_then_real(a, b, k, v, n)
 	int n
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_zonal_if_then_integer(a, b, k, v, n)
@@ -1753,7 +1602,7 @@ ral_grid_zonal_if_then_integer(a, b, k, v, n)
 	int n
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_apply_templ(gd, templ, new_val)
@@ -1762,7 +1611,7 @@ ral_grid_apply_templ(gd, templ, new_val)
 	int new_val
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 ral_grid *
 ral_ca_step(gd, k)
@@ -1796,7 +1645,7 @@ ral_ca_step(gd, k)
 		RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_map(gd, s, d, n)
@@ -1806,7 +1655,7 @@ ral_grid_map(gd, s, d, n)
 	int n
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int 
 ral_grid_map_integer_grid(gd, s_min, s_max, d, n, deflt)
@@ -1824,7 +1673,7 @@ ral_grid_map_integer_grid(gd, s_min, s_max, d, n, deflt)
 			ral_grid_map_integer_grid(gd, s_min, s_max, d, n, NULL);
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int 
 ral_grid_map_real_grid(gd, s_min, s_max, d, n, deflt)
@@ -1842,7 +1691,7 @@ ral_grid_map_real_grid(gd, s_min, s_max, d, n, deflt)
 			ral_grid_map_real_grid(gd, s_min, s_max, d, n, NULL);
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 double
 ral_grid_zonesize(gd, i, j)
@@ -1858,14 +1707,14 @@ ral_grid_zonesize(gd, i, j)
     RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 ral_grid *
 ral_grid_borders(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 			
 
 ral_grid *
@@ -1873,7 +1722,7 @@ ral_grid_borders_recursive(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 			
 
 ral_grid *
@@ -1882,7 +1731,7 @@ ral_grid_areas(gd, k)
 	int k
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 			
 
 NO_OUTPUT int
@@ -1890,7 +1739,7 @@ ral_grid_connect(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_number_of_areas(gd,connectivity)
@@ -1898,7 +1747,7 @@ ral_grid_number_of_areas(gd,connectivity)
 	int connectivity
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 ral_grid *
 ral_grid_clip(gd, i1, j1, i2, j2)
@@ -1921,7 +1770,7 @@ ral_grid_clip(gd, i1, j1, i2, j2)
     RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 ral_grid *
 ral_grid_join(g1, g2)
@@ -1929,7 +1778,7 @@ ral_grid_join(g1, g2)
 	ral_grid *g2
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 int
 ral_grid_pick(dest, src)
@@ -1947,7 +1796,7 @@ ral_grid_transform(gd, tr, M, N, pick, value)
 	int value
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 
 void
@@ -1973,7 +1822,7 @@ ral_grid_line(gd, i1, j1, i2, j2, pen)
   	}
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 void
 ral_grid_filled_rect(gd, i1, j1, i2, j2, pen)
@@ -1998,7 +1847,7 @@ ral_grid_filled_rect(gd, i1, j1, i2, j2, pen)
   	}
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 void
 ral_grid_filled_circle(gd, i, j, r, pen)
@@ -2022,7 +1871,7 @@ ral_grid_filled_circle(gd, i, j, r, pen)
   	}
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 void 
 ral_grid_filled_polygon(gd, g, pen_integer, pen_real)
@@ -2032,7 +1881,7 @@ ral_grid_filled_polygon(gd, g, pen_integer, pen_real)
 	RAL_REAL pen_real
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 AV *
 ral_grid_get_line(gd, i1, j1, i2, j2)
@@ -2087,7 +1936,7 @@ ral_grid_get_line(gd, i1, j1, i2, j2)
     RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 AV *
 ral_grid_get_rect(gd, i1, j1, i2, j2)
@@ -2142,7 +1991,7 @@ ral_grid_get_rect(gd, i1, j1, i2, j2)
     RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 AV *
 ral_grid_get_circle(gd, i, j, r)
@@ -2195,7 +2044,7 @@ ral_grid_get_circle(gd, i, j, r)
     RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 void
 ral_grid_floodfill(gd, i, j, pen, connectivity)
@@ -2218,14 +2067,14 @@ ral_grid_floodfill(gd, i, j, pen, connectivity)
   	}
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_print(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_save_ascii(gd, outfile)
@@ -2233,7 +2082,7 @@ ral_grid_save_ascii(gd, outfile)
 	char *outfile
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 
 AV *
@@ -2287,7 +2136,7 @@ ral_grid2list(gd)
     RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 AV *
 ral_grid_histogram(gd, bin, n)
@@ -2312,7 +2161,7 @@ ral_grid_histogram(gd, bin, n)
     RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 HV *
 ral_grid_contents(gd)
@@ -2344,7 +2193,7 @@ ral_grid_contents(gd)
     RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 HV *
 ral_grid_zonal_count(gd, zones)
@@ -2377,7 +2226,7 @@ ral_grid_zonal_count(gd, zones)
     RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 HV *
 ral_grid_zonal_sum(gd, zones)
@@ -2410,7 +2259,7 @@ ral_grid_zonal_sum(gd, zones)
     RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 HV *
 ral_grid_zonal_min(gd, zones)
@@ -2443,7 +2292,7 @@ ral_grid_zonal_min(gd, zones)
     RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 HV *
 ral_grid_zonal_max(gd, zones)
@@ -2476,7 +2325,7 @@ ral_grid_zonal_max(gd, zones)
     RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 HV *
 ral_grid_zonal_mean(gd, zones)
@@ -2509,7 +2358,7 @@ ral_grid_zonal_mean(gd, zones)
     RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 HV *
 ral_grid_zonal_variance(gd, zones)
@@ -2542,7 +2391,7 @@ ral_grid_zonal_variance(gd, zones)
     RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_grid_grow_zones(zones, grow, connectivity)
@@ -2551,7 +2400,7 @@ ral_grid_grow_zones(zones, grow, connectivity)
 	int connectivity
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 HV *
 ral_grid_neighbors(gd)
@@ -2589,7 +2438,7 @@ ral_grid_neighbors(gd)
     RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 ral_grid *
 ral_grid_bufferzone(gd, z, w)
@@ -2598,7 +2447,7 @@ ral_grid_bufferzone(gd, z, w)
 	double w
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 			
 
 long
@@ -2606,35 +2455,35 @@ ral_grid_count(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 double 
 ral_grid_sum(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 double 
 ral_grid_mean(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 double 
 ral_grid_variance(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 ral_grid *
 ral_grid_distances(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 			
 
 ral_grid *
@@ -2642,7 +2491,7 @@ ral_grid_directions(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 			
 
 ral_grid *
@@ -2650,7 +2499,7 @@ ral_grid_nn(gd)
 	ral_grid *gd
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 			
 
 HV *
@@ -2696,7 +2545,7 @@ ral_grid_zones(gd, z)
     RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 ral_grid *
 ral_grid_dijkstra(w, ci, cj)
@@ -2712,214 +2561,14 @@ ral_grid_dijkstra(w, ci, cj)
     RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
-
-
-ral_integer_grid_layer *
-ral_make_integer_grid_layer(perl_layer)
-	HV *perl_layer
-	CODE:
-		ral_integer_grid_layer *layer = ral_integer_grid_layer_create();
-		SV **s = hv_fetch(perl_layer, "ALPHA", strlen("ALPHA"), 0);
-		if (s) {
-			if (SvIOK(*s))
-				layer->alpha = SvIV(*s);
-			else if (sv_isobject(*s)) {
-				RAL_CHECK(layer->alpha_grid = (ral_grid*)SV2Object(*s, RAL_GRIDPTR));
-			}
-		}
-		RAL_FETCH(perl_layer, "PALETTE_VALUE", layer->palette_type, SvIV);
-		RAL_FETCH(perl_layer, "SYMBOL_VALUE", layer->symbol, SvIV);
-		RAL_FETCH(perl_layer, "SYMBOL_SIZE", layer->symbol_pixel_size, SvIV);
-		RAL_FETCH(perl_layer, "SYMBOL_SCALE_MIN", layer->symbol_size_min, SvIV);
-		RAL_FETCH(perl_layer, "SYMBOL_SCALE_MAX", layer->symbol_size_max, SvIV);
-		s = hv_fetch(perl_layer, "SINGLE_COLOR", strlen("SINGLE_COLOR"), 0);
-		if (s AND SvROK(*s)) {
-			AV *a = (AV*)SvRV(*s);
-			layer->single_color = fetch_color((AV *)SvRV(*s), 0);
-		}
-		RAL_FETCH(perl_layer, "HUE_AT_MIN", layer->hue_at.min, SvIV);
-		RAL_FETCH(perl_layer, "HUE_AT_MAX", layer->hue_at.max, SvIV);
-		RAL_FETCH(perl_layer, "HUE_DIR", layer->hue_dir, SvIV);
-		RAL_FETCH(perl_layer, "HUE", layer->hue, SvIV);
-		RAL_FETCH(perl_layer, "COLOR_SCALE_MIN", layer->range.min, SvIV);
-		RAL_FETCH(perl_layer, "COLOR_SCALE_MAX", layer->range.max, SvIV);
-		s = hv_fetch(perl_layer, "COLOR_TABLE", strlen("COLOR_TABLE"), 0);
-		if (s AND SvROK(*s)) {
-			AV *a = (AV*)SvRV(*s);
-			int i, n = a ? av_len(a)+1 : 0;
-			if (n > 0) {
-				RAL_CHECK(layer->color_table = ral_color_table_create(n));
-				for (i = 0; i < n; i++) {
-					SV **s = av_fetch(a, i, 0);
-					AV *c;
-					RAL_CHECKM(s AND SvROK(*s) AND (c = (AV*)SvRV(*s)), "Bad color table data");
-					s = av_fetch(c, 0, 0);
-					layer->color_table->keys[i] = s ? SvIV(*s) : 0;
-					layer->color_table->colors[i] = fetch_color(c, 1);
-				}
-			}
-		}
-		s = hv_fetch(perl_layer, "COLOR_BINS", strlen("COLOR_BINS"), 0);
-		if (s AND SvROK(*s)) {
-			AV *a = (AV*)SvRV(*s);
-			int i, n = a ? av_len(a)+1 : 0;
-			if (n > 0) {
-				RAL_CHECK(layer->color_bins = ral_integer_color_bins_create(n));
-				for (i = 0; i < n; i++) {
-					SV **s = av_fetch(a, i, 0);
-					AV *c;
-					RAL_CHECKM(s AND SvROK(*s) AND (c = (AV*)SvRV(*s)), "Bad color bins data");
-					s = av_fetch(c, 0, 0);
-					if (i < n-1)
-						layer->color_bins->bins[i] = s ? SvIV(*s) : 0;
-					layer->color_bins->colors[i] = fetch_color(c, 1);
-				}
-			}
-		}
-		goto ok;
-		fail:
-		ral_integer_grid_layer_destroy(&layer);
-		layer = NULL;
-		ok:
-		RETVAL = layer;
-  OUTPUT:
-    RETVAL
-	POSTCALL:
-		if (ral_has_msg())
-			croak(ral_get_msg());
-
-
-void
-ral_destroy_integer_grid_layer(layer)
-	ral_integer_grid_layer *layer
-	CODE:
-		ral_integer_grid_layer_destroy(&layer);
-
-
-ral_real_grid_layer *
-ral_make_real_grid_layer(perl_layer)
-	HV *perl_layer
-	CODE:
-		ral_real_grid_layer *layer = ral_real_grid_layer_create();
-		SV **s = hv_fetch(perl_layer, "ALPHA", strlen("ALPHA"), 0);
-		if (s) {
-			if (SvIOK(*s))
-				layer->alpha = SvIV(*s);
-			else if (sv_isobject(*s)) {
-				RAL_CHECK(layer->alpha_grid = (ral_grid*)SV2Object(*s, RAL_GRIDPTR));
-			}
-		}
-		RAL_FETCH(perl_layer, "PALETTE_VALUE", layer->palette_type, SvIV);
-		RAL_FETCH(perl_layer, "SYMBOL_VALUE", layer->symbol, SvIV);
-		RAL_FETCH(perl_layer, "SYMBOL_SIZE", layer->symbol_pixel_size, SvIV);
-		RAL_FETCH(perl_layer, "SYMBOL_SCALE_MIN", layer->symbol_size_min, SvNV);
-		RAL_FETCH(perl_layer, "SYMBOL_SCALE_MAX", layer->symbol_size_max, SvNV);
-		s = hv_fetch(perl_layer, "SINGLE_COLOR", strlen("SINGLE_COLOR"), 0);
-		if (s AND SvROK(*s)) {
-			AV *a = (AV*)SvRV(*s);
-			layer->single_color = fetch_color((AV *)SvRV(*s), 0);
-		}
-		RAL_FETCH(perl_layer, "HUE_AT_MIN", layer->hue_at.min, SvIV);
-		RAL_FETCH(perl_layer, "HUE_AT_MAX", layer->hue_at.max, SvIV);
-		RAL_FETCH(perl_layer, "HUE_DIR", layer->hue_dir, SvIV);
-		RAL_FETCH(perl_layer, "HUE", layer->hue, SvIV);
-		RAL_FETCH(perl_layer, "COLOR_SCALE_MIN", layer->range.min, SvNV);
-		RAL_FETCH(perl_layer, "COLOR_SCALE_MAX", layer->range.max, SvNV);
-		s = hv_fetch(perl_layer, "COLOR_BINS", strlen("COLOR_BINS"), 0);
-		if (s AND SvROK(*s)) {
-			AV *a = (AV*)SvRV(*s);
-			int i, n = a ? av_len(a)+1 : 0;
-			if (n > 0) {
-				RAL_CHECK(layer->color_bins = ral_real_color_bins_create(n));
-				for (i = 0; i < n; i++) {
-					SV **s = av_fetch(a, i, 0);
-					AV *c;
-					RAL_CHECKM(s AND SvROK(*s) AND (c = (AV*)SvRV(*s)), "Bad color bins data");
-					s = av_fetch(c, 0, 0);
-					if (i < n-1)
-						layer->color_bins->bins[i] = s ? SvNV(*s) : 0;
-					layer->color_bins->colors[i] = fetch_color(c, 1);
-				}
-			}
-		}
-		goto ok;
-		fail:
-		ral_real_grid_layer_destroy(&layer);
-		layer = NULL;
-		ok:
-		RETVAL = layer;
-  OUTPUT:
-    RETVAL
-	POSTCALL:
-		if (ral_has_msg())
-			croak(ral_get_msg());
-
-
-void
-ral_destroy_real_grid_layer(layer);
-	ral_real_grid_layer *layer
-	CODE:
-		ral_real_grid_layer_destroy(&layer);
-
-
-void 
-ral_render_igrid(pb, gd, layer)
-	ral_pixbuf *pb
-	ral_grid *gd
-	ral_integer_grid_layer *layer
-	CODE:
-		layer->gd = gd;
-		ral_render_integer_grid(pb, layer);
-	POSTCALL:
-		if (ral_has_msg())
-			croak(ral_get_msg());
-
-
-void 
-ral_render_rgrid(pb, gd, layer)
-	ral_pixbuf *pb
-	ral_grid *gd
-	ral_real_grid_layer *layer
-	CODE:
-		layer->gd = gd;
-		ral_render_real_grid(pb, layer);
-	POSTCALL:
-		if (ral_has_msg())
-			croak(ral_get_msg());
-
-void 
-ral_render_grids(pb, b1, b2, b3, alpha, color_interpretation)
-	ral_pixbuf *pb
-	ral_grid *b1
-	ral_grid *b2
-	ral_grid *b3
-	SV *alpha
-	int color_interpretation
-	CODE:
-		short a = 255;
-		ral_grid *a_gd = NULL;
-		if (SvIOK(alpha))
-			a = SvIV(alpha);
-		else if (sv_isobject(alpha)) {
-			RAL_CHECK(a_gd = (ral_grid*)SV2Object(alpha, RAL_GRIDPTR));
-		} else {
-			croak("alpha is not integer nor a grid");
-			goto fail;
-		}
-		/*ral_render_grids(pb, b1, b2, b3, a, a_gd, color_interpretation);*/
-		fail:
-	POSTCALL:
-		if (ral_has_msg())
-			croak(ral_get_msg());
-
+			croak("%s",ral_get_msg());
 
 ral_grid *
 ral_dem_aspect(dem)
 	ral_grid *dem
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 AV *
 ral_dem_fit_surface(dem, z_factor)
@@ -2944,7 +2593,7 @@ ral_dem_fit_surface(dem, z_factor)
 		RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 			
 
 ral_grid *
@@ -2953,7 +2602,7 @@ ral_dem_slope(dem, z_factor)
 	double z_factor
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 			
 
 ral_grid *
@@ -2962,17 +2611,18 @@ ral_dem_fdg(dem, method)
 	int method
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 AV *
-outlet(fdg, i, j)
+ral_fdg_outlet(fdg, streams, i, j)
 	ral_grid *fdg
+	ral_grid *streams
 	int i
 	int j
 	CODE:
 	{
 		ral_cell c = {i, j};
-		c = ral_fdg_outlet(fdg, c);
+		c = ral_fdg_outlet(fdg, streams, c);
 		AV *av = newAV();
 		sv_2mortal((SV*)av);
 		if (av) {
@@ -2987,14 +2637,14 @@ outlet(fdg, i, j)
 		RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 ral_grid *
 ral_dem_ucg(dem) 
 	ral_grid *dem
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 int
 ral_fdg_drain_flat_areas1(fdg, dem)
@@ -3002,7 +2652,7 @@ ral_fdg_drain_flat_areas1(fdg, dem)
 	ral_grid *dem
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 int
 ral_fdg_drain_flat_areas2(fdg, dem)
@@ -3010,7 +2660,7 @@ ral_fdg_drain_flat_areas2(fdg, dem)
 	ral_grid *dem
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 int
 ral_dem_raise_pits(dem, z_limit)
@@ -3018,7 +2668,7 @@ ral_dem_raise_pits(dem, z_limit)
 	double z_limit
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 int
 ral_dem_lower_peaks(dem, z_limit)
@@ -3026,16 +2676,15 @@ ral_dem_lower_peaks(dem, z_limit)
 	double z_limit
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 ral_grid *
-ral_dem_depressions(dem, fdg, inc_m)
-	ral_grid *dem
+ral_fdg_depressions(fdg, inc_m)
 	ral_grid *fdg
 	int inc_m
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());	
+			croak("%s",ral_get_msg());	
 
 int
 ral_dem_fill_depressions(dem, fdg)
@@ -3043,7 +2692,7 @@ ral_dem_fill_depressions(dem, fdg)
 	ral_grid *fdg
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_dem_breach(dem, fdg, limit)
@@ -3052,7 +2701,7 @@ ral_dem_breach(dem, fdg, limit)
 	int limit
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 int
 ral_fdg_drain_depressions(fdg, dem)
@@ -3060,21 +2709,32 @@ ral_fdg_drain_depressions(fdg, dem)
 	ral_grid *dem
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
-NO_OUTPUT int
-ral_water_route(water, dem, fdg, flow, k, d, f, r)
+ral_grid *
+ral_water_route(water, dem, fdg, k, r)
 	ral_grid *water
 	ral_grid *dem
 	ral_grid *fdg
-	ral_grid *flow
 	ral_grid *k
-	ral_grid *d
-	int f
 	double r
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
+
+ral_grid *
+ral_water_route2(water, dem, k, r)
+	ral_grid *water
+	ral_grid *dem
+	ral_grid *k
+	double r
+	CODE:
+		RETVAL = ral_water_route(water, dem, NULL, k, r);
+  	OUTPUT:	
+		RETVAL
+	POSTCALL:
+		if (ral_has_msg())
+			croak("%s",ral_get_msg());
 
 ral_grid *
 ral_fdg_path(fdg, i, j, stop)
@@ -3092,7 +2752,7 @@ ral_fdg_path(fdg, i, j, stop)
 		RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 ral_grid *
 ral_fdg_path_length(fdg, stop, op)
@@ -3111,7 +2771,7 @@ ral_fdg_path_length(fdg, stop, op)
 		RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 ral_grid *
 ral_fdg_path_sum(fdg, stop, op)
@@ -3127,7 +2787,7 @@ ral_fdg_path_sum(fdg, stop, op)
 		RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 ral_grid *
 ral_fdg_upslope_sum(fdg, op, include_self)
@@ -3136,7 +2796,7 @@ ral_fdg_upslope_sum(fdg, op, include_self)
 	int include_self
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 ral_grid *
 ral_fdg_upslope_count(fdg, op, include_self)
@@ -3145,7 +2805,7 @@ ral_fdg_upslope_count(fdg, op, include_self)
 	int include_self
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 ral_grid *
 ral_fdg_upslope_count_without_op(fdg, include_self)
@@ -3157,27 +2817,7 @@ ral_fdg_upslope_count_without_op(fdg, include_self)
 		RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
-
-ral_grid *
-ral_fdg_distance_to_pit(fdg, steps)
-	ral_grid *fdg
-	int steps
-	CODE:
-		RETVAL = ral_fdg_distance_to_channel(fdg, NULL, steps);
-	OUTPUT:	
-		RETVAL
-	POSTCALL:
-		if (ral_has_msg())
-			croak(ral_get_msg());
-
-ral_grid *
-ral_fdg_distance_to_channel(fdg, streams, int steps)
-	ral_grid *fdg
-	ral_grid *streams
-	POSTCALL:
-		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 long
 ral_fdg_catchment(fdg, mark, i, j, m)
@@ -3195,7 +2835,7 @@ ral_fdg_catchment(fdg, mark, i, j, m)
 		RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_streams_vectorize(streams, fdg, i, j)
@@ -3205,7 +2845,7 @@ ral_streams_vectorize(streams, fdg, i, j)
 	int j
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_compare_dem_derived_ws_attribs(str, uag, dem, dir, basename, iname, ielev, idarea)
@@ -3219,7 +2859,7 @@ ral_compare_dem_derived_ws_attribs(str, uag, dem, dir, basename, iname, ielev, i
 	int idarea
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_fdg_kill_extra_outlets(fdg, lakes, uag)
@@ -3228,7 +2868,7 @@ ral_fdg_kill_extra_outlets(fdg, lakes, uag)
 	ral_grid *uag
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_streams_prune(streams, fdg, lakes, i, j, min_l)
@@ -3246,7 +2886,7 @@ ral_streams_prune(streams, fdg, lakes, i, j, min_l)
 			ral_streams_prune2(streams, fdg, lakes, min_l);
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_streams_prune_without_lakes(streams, fdg, i, j, min_l)
@@ -3263,7 +2903,7 @@ ral_streams_prune_without_lakes(streams, fdg, i, j, min_l)
 			ral_streams_prune2(streams, fdg, NULL, min_l);
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_streams_number(streams, fdg, i, j, sid0)
@@ -3280,7 +2920,7 @@ ral_streams_number(streams, fdg, i, j, sid0)
 			ral_streams_number2(streams, fdg, sid0);
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 NO_OUTPUT int
 ral_streams_break(streams, fdg, lakes, nsid)
@@ -3290,7 +2930,7 @@ ral_streams_break(streams, fdg, lakes, nsid)
 	int nsid
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 ral_grid *
 ral_streams_subcatchments(streams, fdg, i, j)
@@ -3310,7 +2950,7 @@ ral_streams_subcatchments(streams, fdg, i, j)
 		RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 HV *
 ral_catchment_create(sheds, streams, fdg, lakes, i, j, headwaters)
@@ -3350,7 +2990,7 @@ ral_catchment_create(sheds, streams, fdg, lakes, i, j, headwaters)
 		RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 AV *
 ral_grid_variogram(ral_grid *gd, double max_lag, int lags)
@@ -3376,7 +3016,7 @@ ral_grid_variogram(ral_grid *gd, double max_lag, int lags)
 		RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
 AV *
 ral_grid_krige(ral_grid *gd, int i, int j, char *S, double param, double range)
@@ -3391,5 +3031,364 @@ ral_grid_krige(ral_grid *gd, int i, int j, char *S, double param, double range)
 		RETVAL
 	POSTCALL:
 		if (ral_has_msg())
-			croak(ral_get_msg());
+			croak("%s",ral_get_msg());
 
+ral_pixbuf *
+gtk2_ex_geo_pixbuf_create(int width, int height, double minX, double maxY, double pixel_size, int bgc1, int bgc2, int bgc3)
+	CODE:
+		GDALColorEntry background = {bgc1, bgc2, bgc3, 255};
+		ral_pixbuf *pb = ral_pixbuf_create(width, height, minX, maxY, pixel_size, background);
+		RETVAL = pb;
+  OUTPUT:
+    RETVAL
+	POSTCALL:
+		if (ral_has_msg())
+			croak("%s",ral_get_msg());
+
+ral_pixbuf *
+ral_pixbuf_create_from_grid(gd)
+	ral_grid *gd
+	POSTCALL:
+		if (ral_has_msg())
+			croak("%s",ral_get_msg());
+
+void 
+gtk2_ex_geo_pixbuf_destroy(pb)
+	ral_pixbuf *pb
+	CODE:
+	ral_pixbuf_destroy(&pb);
+
+void
+ral_pixbuf_save(pb, filename, type, option_keys, option_values)
+	ral_pixbuf *pb
+	const char *filename
+	const char *type
+	AV* option_keys
+	AV* option_values
+	CODE:
+		GdkPixbuf *gpb;
+		GError *error = NULL;
+		int i;
+		char **ok = NULL;
+		char **ov = NULL;
+		int size = av_len(option_keys)+1;
+		gpb = ral_gdk_pixbuf(pb);
+		RAL_CHECKM(ok = (char **)calloc(size, sizeof(char *)), RAL_ERRSTR_OOM);
+		RAL_CHECKM(ov = (char **)calloc(size, sizeof(char *)), RAL_ERRSTR_OOM);
+		for (i = 0; i < size; i++) {
+			STRLEN len;
+			SV **s = av_fetch(option_keys, i, 0);
+			ok[i] = SvPV(*s, len);
+			s = av_fetch(option_values, i, 0);
+			ov[i] = SvPV(*s, len);
+		}
+		gdk_pixbuf_savev(gpb, filename, type, ok, ov, &error);
+		fail:
+		if (ok) {
+			for (i = 0; i < size; i++) {
+				if (ok[i]) free (ok[i]);
+			}
+			free(ok);
+		}
+		if (ov) {
+			for (i = 0; i < size; i++) {
+				if (ov[i]) free (ov[i]);
+			}
+			free(ov);
+		}
+		if (error) {
+			croak("%s",error->message);
+			g_error_free(error);
+		}
+	POSTCALL:
+		if (ral_has_msg())
+			croak("%s",ral_get_msg());
+
+ral_integer_grid_layer *
+ral_make_integer_grid_layer(perl_layer)
+	HV *perl_layer
+	CODE:
+		ral_visual visual;
+		ral_visual_initialize(&visual);
+		visual.symbol_field_type = visual.color_field_type = OFTInteger;
+		ral_integer_grid_layer *layer = NULL;
+		RAL_CHECK(fetch2visual(perl_layer, &visual, NULL));
+		RAL_CHECK(layer = ral_integer_grid_layer_create());
+
+		SV **s = hv_fetch(perl_layer, "ALPHA", strlen("ALPHA"), 0);
+		if (s && sv_isobject(*s))
+		   RAL_CHECK(layer->alpha_grid = (ral_grid*)SV2Object(*s, RAL_GRIDPTR));
+
+		layer->alpha = visual.alpha;
+		layer->palette_type = visual.palette_type;
+		layer->symbol = visual.symbol;
+		layer->symbol_pixel_size = visual.symbol_pixel_size;
+		layer->symbol_size_scale = visual.symbol_size_scale_int;
+		layer->single_color = visual.single_color;		
+		layer->hue_at = visual.hue_at;
+		layer->invert = visual.invert;
+		layer->scale = visual.scale;
+		layer->grayscale_base_color = visual.grayscale_base_color;
+		layer->color_scale = visual.color_scale_int;
+		layer->color_table = visual.color_table;
+		visual.color_table = NULL;
+		layer->color_bins = visual.int_bins;
+		visual.int_bins = NULL;
+
+		goto ok;
+		fail:
+		ral_integer_grid_layer_destroy(&layer);
+		layer = NULL;
+		ok:
+		ral_visual_finalize(visual);
+		RETVAL = layer;
+  OUTPUT:
+    RETVAL
+	POSTCALL:
+		if (ral_has_msg())
+			croak("%s",ral_get_msg());
+
+
+void
+ral_destroy_integer_grid_layer(layer)
+	ral_integer_grid_layer *layer
+	CODE:
+		ral_integer_grid_layer_destroy(&layer);
+
+
+ral_real_grid_layer *
+ral_make_real_grid_layer(perl_layer)
+	HV *perl_layer
+	CODE:
+		ral_visual visual;
+		ral_visual_initialize(&visual);
+		visual.symbol_field_type = visual.color_field_type = OFTReal;
+		ral_real_grid_layer *layer = NULL;
+		RAL_CHECK(fetch2visual(perl_layer, &visual, NULL));
+		RAL_CHECK(layer = ral_real_grid_layer_create());
+
+		SV **s = hv_fetch(perl_layer, "ALPHA", strlen("ALPHA"), 0);
+		if (s && sv_isobject(*s))
+		   RAL_CHECK(layer->alpha_grid = (ral_grid*)SV2Object(*s, RAL_GRIDPTR));
+
+		layer->alpha = visual.alpha;
+		layer->palette_type = visual.palette_type;
+		layer->symbol = visual.symbol;
+		layer->symbol_pixel_size = visual.symbol_pixel_size;
+		layer->symbol_size_scale = visual.symbol_size_scale_double;
+		layer->single_color = visual.single_color;
+		layer->hue_at = visual.hue_at;
+		layer->invert = visual.invert;
+		layer->scale = visual.scale;
+		layer->grayscale_base_color = visual.grayscale_base_color;
+		layer->color_scale = visual.color_scale_double;
+		layer->color_bins = visual.double_bins;
+		visual.double_bins = NULL;
+
+		goto ok;
+		fail:
+		ral_real_grid_layer_destroy(&layer);
+		layer = NULL;
+		ok:
+		ral_visual_finalize(visual);
+		RETVAL = layer;
+  OUTPUT:
+    RETVAL
+	POSTCALL:
+		if (ral_has_msg())
+			croak("%s",ral_get_msg());
+
+
+void
+ral_destroy_real_grid_layer(layer);
+	ral_real_grid_layer *layer
+	CODE:
+		ral_real_grid_layer_destroy(&layer);
+
+
+void 
+ral_render_igrid(pb, gd, layer)
+	gtk2_ex_geo_pixbuf *pb
+	ral_grid *gd
+	ral_integer_grid_layer *layer
+	CODE:
+		ral_pixbuf rpb;
+		gtk2_ex_geo_pixbuf_2_ral_pixbuf(pb, &rpb);
+		layer->gd = gd;
+		ral_render_integer_grid(&rpb, layer);
+	POSTCALL:
+		if (ral_has_msg())
+			croak("%s",ral_get_msg());
+
+
+void 
+ral_render_rgrid(pb, gd, layer)
+	gtk2_ex_geo_pixbuf *pb
+	ral_grid *gd
+	ral_real_grid_layer *layer
+	CODE:
+		ral_pixbuf rpb;
+		gtk2_ex_geo_pixbuf_2_ral_pixbuf(pb, &rpb);
+		layer->gd = gd;
+		ral_render_real_grid(&rpb, layer);
+	POSTCALL:
+		if (ral_has_msg())
+			croak("%s",ral_get_msg());
+
+void 
+ral_render_grids(pb, b1, b2, b3, alpha, color_interpretation)
+	ral_pixbuf *pb
+	ral_grid *b1
+	ral_grid *b2
+	ral_grid *b3
+	SV *alpha
+	int color_interpretation
+	CODE:
+		short a = 255;
+		ral_grid *a_gd = NULL;
+		if (SvIOK(alpha))
+			a = SvIV(alpha);
+		else if (sv_isobject(alpha)) {
+			RAL_CHECK(a_gd = (ral_grid*)SV2Object(alpha, RAL_GRIDPTR));
+		} else {
+			croak("%s","alpha is not integer nor a grid");
+			goto fail;
+		}
+		/*ral_render_grids(pb, b1, b2, b3, a, a_gd, color_interpretation);*/
+		fail:
+	POSTCALL:
+		if (ral_has_msg())
+			croak("%s","%s",ral_get_msg());
+
+
+ral_visual_layer *
+ral_visual_layer_create(perl_layer, ogr_layer)
+	HV *perl_layer
+	OGRLayerH ogr_layer
+	CODE:
+		ral_visual_layer *layer = ral_visual_layer_create();
+		layer->layer = ogr_layer;
+		RAL_CHECK(fetch2visual(perl_layer, &layer->visualization, OGR_L_GetLayerDefn(layer->layer)));
+		goto ok;
+		fail:
+		ral_visual_layer_destroy(&layer);
+		layer = NULL;
+		ok:
+		RETVAL = layer;
+  OUTPUT:
+    RETVAL
+	POSTCALL:
+		if (ral_has_msg())
+			croak("%s",ral_get_msg());
+
+void
+ral_visual_layer_destroy(layer)
+	ral_visual_layer *layer
+	CODE:
+		ral_visual_layer_destroy(&layer);
+
+void
+ral_visual_layer_render(layer, pb)
+	ral_visual_layer *layer
+	ral_pixbuf *pb
+	CODE:
+		ral_render_visual_layer(pb, layer);
+	POSTCALL:
+	if (ral_has_msg())
+		croak("%s",ral_get_msg());
+
+ral_visual_feature_table *
+ral_visual_feature_table_create(perl_layer, features)
+	HV *perl_layer
+	AV *features
+	CODE:
+		ral_visual_feature_table *layer = ral_visual_feature_table_create(av_len(features)+1);
+		RAL_CHECK(layer);
+		char *color_field_name = NULL, *symbol_size_field_name = NULL;;
+
+		RAL_FETCH(perl_layer, "COLOR_FIELD", color_field_name, SvPV_nolen);
+		RAL_FETCH(perl_layer, "SYMBOL_FIELD", symbol_size_field_name, SvPV_nolen);
+
+		int i;
+		for (i = 0; i <= av_len(features); i++) {
+			SV** sv = av_fetch(features,i,0);
+			OGRFeatureH f = SV2Handle(*sv);
+			layer->features[i].feature = f;
+			OGRFeatureDefnH fed = OGR_F_GetDefnRef(f);
+
+			int field = -1;
+			if (color_field_name) {
+				field = OGR_FD_GetFieldIndex(fed, color_field_name);
+				if (field >= 0) {
+					OGRFieldDefnH fid = OGR_FD_GetFieldDefn(fed, field);
+					OGRFieldType fit = OGR_Fld_GetType(fid);
+					if (!(fit == OFTInteger OR fit == OFTReal))
+						field = -1;
+				}
+			}
+			RAL_STORE(perl_layer, "COLOR_FIELD_VALUE", field, newSViv);
+
+			field = -2;
+			if (symbol_size_field_name) {
+				field = OGR_FD_GetFieldIndex(fed, symbol_size_field_name);
+				if (field >= 0) {
+					OGRFieldDefnH fid = OGR_FD_GetFieldDefn(fed, field);
+					OGRFieldType fit = OGR_Fld_GetType(fid);
+					if (!(fit == OFTInteger OR fit == OFTReal))
+						field = -2;
+				} else
+					field = -2;
+			}
+			RAL_STORE(perl_layer, "SYMBOL_FIELD_VALUE", field, newSViv);
+
+			RAL_CHECK(fetch2visual(perl_layer, &layer->features[i].visualization, OGR_F_GetDefnRef(f)));
+			
+		}
+
+		goto ok;
+		fail:
+		ral_visual_feature_table_destroy(&layer);
+		layer = NULL;
+		ok:
+		RETVAL = layer;
+  OUTPUT:
+    RETVAL
+	POSTCALL:
+		if (ral_has_msg())
+			croak("%s",ral_get_msg());
+
+void
+ral_visual_feature_table_destroy(layer)
+	ral_visual_feature_table *layer
+	CODE:
+		ral_visual_feature_table_destroy(&layer);
+
+void
+ral_visual_feature_table_render(layer, pb)
+	ral_visual_feature_table *layer
+	ral_pixbuf *pb
+	CODE:
+		ral_render_visual_feature_table(pb, layer);
+	POSTCALL:
+	if (ral_has_msg())
+		croak("%s",ral_get_msg());
+
+GdkPixbuf_noinc *
+gtk2_ex_geo_pixbuf_get_pixbuf(ral_pixbuf *pb)
+	CODE:
+		if (ral_cairo_to_pixbuf(pb))
+			RETVAL = ral_gdk_pixbuf(pb);
+	OUTPUT:
+		RETVAL
+	POSTCALL:
+		if (ral_has_msg())
+			croak("%s",ral_get_msg());
+
+cairo_surface_t_noinc *
+gtk2_ex_geo_pixbuf_get_cairo_surface(pb)
+	ral_pixbuf *pb
+    CODE:
+	RETVAL = cairo_image_surface_create_for_data
+		(pb->image, CAIRO_FORMAT_ARGB32, pb->N, pb->M, pb->image_rowstride);
+    OUTPUT:
+	RETVAL

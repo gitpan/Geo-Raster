@@ -1,88 +1,70 @@
 ## @class Geo::Raster::Algorithms
-# @brief Adds various algorithm methods into Geo::Raster
+# @brief Adds various algorithmic methods to Geo::Raster
 package Geo::Raster;
+
+use strict;
+# use Geo::Vector but allow silent failure
+# which is useful when testing Geo::Raster without Geo::Vector
+# if Geo::Vector is not available polygonize will not work
+eval {
+    require Geo::Vector;
+};
 
 ## @method Geo::Raster interpolate(%params)
 #
-# @brief Interpolation of the raster grid.
+# @brief Interpolate values for nodata cells.
 #
-# Example of applying interpolation directly to this grid:
-# @code
-# $grid->interpolate(method=>"nn");
-# @endcode
-# Example of creating a new grid with the interpolation results:
-# @code
-# $new_grid = $grid->interpolate(method=>"nn");
-# @endcode
-#
-# @param[in] params A hash having a named parameter:
-# - method => string. At moment are supported: nearest neighbour interpolation, 
-# which is named as 'nn'.
-# @return Returns a new raster grid, if a return value is wanted, else the 
-# interpolation will be done to this grid.
-# @exception A unsupported method is given in the hash.
-# @todo Add more interpolation methods. For example Bilinear, Cubic and
-# Inverse Distance Weighted interpolation.
+# @param[in] params Named parameters:
+# - <i>method</i> => string. At moment only 'nearest neighbor' is
+# supported.
+# @return a new raster. In void context changes this raster.
+# @exception A unsupported method is specified.
+# @todo Add more interpolation methods.
 sub interpolate {
     my($self, %param) = @_;
-    if (!$param{method}) {
-	print STDERR "WARNING: interpolation method not set, using nearest data cell\n" unless $param{quiet};
-	$param{method} = 'nn';
-    }
+    $param{method} = 'nearest neighbor' unless defined $param{method};
+    $param{method} = 'nearest neighbor' if $param{method} eq 'nn';
     my $new;
-    if ($param{method} eq 'nn') {
+    if ($param{method} eq 'nearest neighbor') {
 	$new = ral_grid_nn($self->{GRID});
-	if ($new) {
-	    $new = new Geo::Raster $new;
-	} else {
-	    return;
-	}
     } else {
 	croak "interpolation method '$param{method}' not implemented\n";
     }
     if (defined wantarray) {
-	return $new;
+	return Geo::Raster->new($new);
     } else {
-	my $tmp = $new->{GRID};
-	$new->{GRID} = $self->{GRID};
-	attributes($new);
-	$self->{GRID} = $tmp;
-	attributes($self);
+	ral_grid_destroy($self->{GRID});
+	$self->{GRID} = $new;
     }
 }
 
 ## @method Geo::Raster dijkstra(@cell)
 #
-# @brief Calculates the distance from each cell to the destination cell given as 
-# parameter.
+# @brief Computes a cost-to-go raster for a given cost raster and a
+# target cell.
 #
-# This raster grid gives the weights to travel from a cell a to neighboring cell.
-# The actual cost will be to 4-neighbours (horizontal and vertical):
-#
-# cost = cell1 x 0.5 + weight x 0.5 x cell2 
-#
-# else
-#
-# cost = cell1 x sqrt(2)/2 + weight x sqrt(2)/2 x cell2 
-#
-# If the value at weight is < 1 the cell cannot be entered.
-# @param[in] cell An array having the destination cells grid coordinates (i, j).
-# @return Returns a new raster grid, if a return value is wanted, else the 
-# costs are put to this grid.
+# When this method is applied to a cost raster, the method computes
+# the cost to travel to the target cell from each cell in the
+# raster. If the cost at a cell is less than one, the cell cannot be
+# a part of the optimal route to the target.
+# @param[in] cell The target cell.
+# @return a new raster. In void context changes this raster.
 sub dijkstra {
     my($self, $i, $j) = @_;
-    my $cost = ral_grid_dijkstra($self->{GRID}, $i, $j);
-    return unless $cost;
-    $cost = new Geo::Raster $cost;
-    return $cost;
+    my $new = ral_grid_dijkstra($self->{GRID}, $i, $j);
+    if (defined wantarray) {
+	return Geo::Raster->new($new);
+    } else {
+	ral_grid_destroy($self->{GRID});
+	$self->{GRID} = $new;
+    }
 }
 
 ## @method Geo::Raster colored_map()
 #
-# @brief Maps all the values creating areas in the map in to the smallest 
-# numbers (unique colors).
-# @return Returns a new raster grid if wanted, else the method reclassifies this
-# grids values.
+# @brief Attempts to use the smallest possible number of integers for
+# the zones in the raster.
+# @return a new raster. In void context changes this raster.
 sub colored_map {
     my $self = shift;
     my $n = $self->neighbors();
@@ -127,14 +109,13 @@ sub colored_map {
 
 ## @method Geo::Raster applytempl(listref templ, $new_val)
 #
-# @brief Goes trough the grid comparing the given template to each cell and its 
-# neighbours returning the comparison result or gives it to this grid.
+# @brief Apply a modifying template on the raster.
 #
 # The "apply template" method is a generic method which is, e.g., used
 # in the thinning algorithm.
 #
 # @code
-# $gd->applytempl(\@templ, $new_val);
+# $a->applytempl(\@templ, $new_val);
 # @endcode
 #
 # @param[in] templ The structuring template (or mask) to use
@@ -151,464 +132,79 @@ sub colored_map {
 # @param[in] new_val (optional). New value to give to the center cell if the 
 # template rules match the cell and its 8 neighbours. If not given, then 1 is 
 # used to inform about match success.
-# @return In void context (no return grid is wanted) the method changes this 
-# grid, otherwise the method returns a new grid with the comparison results.
-# @note This grid has to be of type integer grid and specially a binary grid.
-# @todo Check if the methods name ral_grid_applytempl which is called is true,
-# because in Raster.xs exists ral_grid_apply_templ, but not ral_grid_applytempl.
+# @return a new raster. In void context changes this raster.
 sub applytempl {
     my($self, $templ, $new_val) = @_;
     croak "applytempl: too few values in the template" if $#$templ < 8;
     $new_val = 1 unless $new_val;
-    $self = Geo::Raster::new($self) if defined wantarray;
-    ral_grid_applytempl($self->{GRID}, $templ, $new_val);
+    $self = Geo::Raster->new($self) if defined wantarray;
+    ral_grid_apply_templ($self->{GRID}, $templ, $new_val);
     return $self if defined wantarray;
 }
 
-## @method hahsref polynize($connectivity)
+## @method Geo::Vector polygonize(%params)
 #
-# @brief Returns a reference of to a hash, where each polygon has its own key 
-# (a number), value and the left and right endings of each single connected 
-# piece on every row.
+# @brief Polygonizes the raster into a polygon OGR layer.
 #
-# @param[in] connectivity (optional). Connectivity between cells as a number:4 
-# or 8. If connectivity is not given then 8-connectivity is used.
-# @return Returns a reference to an hash including each polygon.
-# The hash has named parameters, which have as keys the keys of the polygons (unigue 
-# numbers) that have as values a reference to a hash having two named parameters:
-# - <I>value</I>=>number. The polygons value.
-# - <I>lines</I>=>array. A two dimensional array having the left and right 
-# endings of each single connected piece on every row [[left, right], 
-# [left, right], ...].
-# The polygon can naturally have several pieces on a single row.
+# @param[in] params Named parameters that go to the constructor of
+# Geo::Vector. Uses Polygonize from GDAL.
+#
+# @return a new OGR layer wrapped into a Geo::Vector object.
 sub polygonize {
-    my($self, $connectivity) = @_;
-    $connectivity = 8 unless defined $connectivity and $connectivity == 4;
-    my $grid = $self->{GRID};
+    my ($self, %params) = @_;
 
-    my %polygons;
-    my $key = 1;
+    $params{pixel_value_field} = 'value' unless $params{pixel_value_field};
 
-	# Going trough each row.
-    for my $i (0..$self->{M}-1) {
-	
-	my $left = 0;
-	my $value = ral_grid_get($grid, $i, $left);
-	
-	# Going trough each cell in the row.
-	for my $j (1..$self->{N}-1) {
-	    
-	    my $d = ral_grid_get($grid, $i, $j);
-	    
-	    if ((!defined $d and defined $value) or 
-		(defined $d and !defined $value) or 
-		($d != $value)) {
-		
-		# we have a piece		
-		$key = add_piece(\%polygons, $key, $value, $i, $left, $j-1, $connectivity) if defined $value;
-		$left = $j;
-		$value = $d;
-	
-	    }
-	    
-	}
-	$key = add_piece(\%polygons, $key, $value, $i, $left, $self->{N}-1, $connectivity) if defined $value;
-    }
-    return \%polygons;
-}
-
-## @fn $add_piece(hashref polygons, $key, $value, $line, $left, $right, $connectivity)
-#
-# @brief Adds a piece to the polygons in the given hash.
-# (of some already existing or new)
-#
-# @param[in, out] polygons Reference to an hash including each polygon.
-# The hash has named parameters, which have as keys the keys of the polygons (unigue 
-# numbers) that have as values a reference to a hash having two named parameters:
-# - <I>value</I>=>number. The polygons value.
-# - <I>lines</I>=>array. A two dimensional array having the left and right 
-# endings of each single connected piece on every row [[left, right], 
-# [left, right], ...].
-# @param[in, out] key Key (a number) of the last polygon added to the polygon hash.
-# @param[in] value Value of the piece to add to the polygon. 
-# @param[in] line Number of the grid column where the piece is located (a 
-# number between 0-(N-1).
-# @param[in] left The most left j-coordinate of the piece to add.
-# @param[in] right The most right j-coordinate of the piece to add.
-# @param[in] connectivity (optional). Connectivity between cells as a number:4 
-# or 8. If connectivity is not given then 8-connectivity is used.
-# @return Returns the count of polygons in the hash.
-sub add_piece {
-    my($polygons, $key, $value, $line, $left, $right, $connectivity) = @_;
-    my @piece_belongs_to_these_polygons;
-    my $d = $connectivity == 8 ? 1 : 0;
-    for my $k (keys %$polygons) {
-	# see if this piece belongs to this polygon
-	next unless $value == $polygons->{$k}->{value};
-	my $from_line_above = $polygons->{$k}->{lines}->{$line-1};
-	if ($from_line_above) {
-	    my $belongs = 0;
-	    for my $piece (@$from_line_above) { # $piece is [left,right]
-		# does not belong if
-		next if $left > $piece->[1]+$d;
-		next if $right < $piece->[0]-$d;
-		$belongs = 1;
-		last;
-	    }
-	    push @piece_belongs_to_these_polygons,$k if $belongs;
-	}
-    }
-    if (@piece_belongs_to_these_polygons > 1) {
-	# Joining the piece to more than just one polygon.
-	my $k = join_polygons($polygons, @piece_belongs_to_these_polygons);
-	push @{$polygons->{$k}->{lines}->{$line}},[$left,$right];
-    } elsif (@piece_belongs_to_these_polygons == 1) {
-	# Joining a single polygon piece to that single polygon to which it 
-	# belongs to.
-	my $k = shift @piece_belongs_to_these_polygons;
-	push @{$polygons->{$k}->{lines}->{$line}},[$left,$right];	
+    my $vector;
+    
+    if ($params{vector}) {
+	croak "Layer given as parameter does not contain field '$params{pixel_value_field}' for pixel values." 
+	    unless $params{vector}->schema->field($params{pixel_value_field});
+	$vector = $params{vector};
     } else {
-    	# The piece did not belong to any polygon, so it creates it's own polygon.
-	$polygons->{$key} = { value => $value,
-			      lines => {
-				  $line => [[$left,$right]],
-			      },
-			  };
-	$key++;
-    }
-    return $key;
-}
-
-## @fn $join_polygons(hashref polygons, @k)
-#
-# @brief Jois the given polygons and removes all other except one from the 
-# polygon hashref.
-# @param[in, out] polygons Reference to an hash including each polygon.
-# The hash has named parameters, which have as keys the keys of the polygons (unigue 
-# numbers) that have as values a reference to a hash having two named parameters:
-# - <I>value</I>=>number. The polygons value.
-# - <I>lines</I>=>array. A two dimensional array having the left and right 
-# endings of each single connected piece on every row [[left, right], 
-# [left, right], ...].
-# @param[in] k Keys of the polygons in the polygon hashref, which should be joined.
-# @return Returns the key of that 
-sub join_polygons {
-    my $polygons = shift;
-    my $k = shift;
-    # join polygons @_ to polygon $k
-    for my $l (@_) {
-	for my $line (keys %{$polygons->{$l}->{lines}}) {
-	    push @{$polygons->{$k}->{lines}->{$line}},@{$polygons->{$l}->{lines}->{$line}};
+	$params{geometry_type} = 'Polygon';
+	delete $params{geometries};
+	delete $params{features};
+	$params{create} = 'polygonized' unless ($params{create} or $params{layer} or $params{open});	
+	if ($params{schema}) {
+	    my $found;
+	    for my $field (@{$params{schema}{Fields}}) {
+		$found = 1, last if $field->{Name} eq $params{pixel_value_field};
+	    }
+	    push @{$params{schema}{Fields}}, { Name => 'value', Type => 'Integer' } unless $found;
 	}
-	delete $polygons->{$l};
-    }
-    return $k;
-}
-
-## @fn listref the_border_of_a_polygon(hashref p)
-#
-# @todo Documentation. 
-sub the_border_of_a_polygon {
-    my ($p) = @_;
-    my $faces = the_border_of_a_polygon_as_faces($p);
-    my @path;
-
-    my($i2p,$j2p) = (-1,-1);
-    for my $face (@$faces) {
-	my($f,$i,$j) = @$face;
-	my($i1,$j1,$i2,$j2);
-	
-	if ($f eq 'T') {
-	    ($i1,$j1) = ($i,$j);
-	    ($i2,$j2) = ($i,$j+1);
-	}
-	elsif ($f eq 'R') {
-	    ($i1,$j1) = ($i,$j+1);
-	    ($i2,$j2) = ($i+1,$j+1);
-	}
-	elsif ($f eq 'B') {
-	    ($i1,$j1) = ($i+1,$j+1);
-	    ($i2,$j2) = ($i+1,$j);
-	}
-	elsif ($f eq 'L') {
-	    ($i1,$j1) = ($i+1,$j);
-	    ($i2,$j2) = ($i,$j);
-	}
-	
-	push @path,[$i1, $j1] unless $i1 == $i2p and $j1 == $j2p;
-	push @path,[$i2, $j2];
-	
-	($i2p,$j2p) = ($i2,$j2);
+	eval {
+	    $vector = Geo::Vector->new(%params);
+	};
+	croak "$@" if $@;
     }
 
-    return \@path;
-}
-
-## @fn listref the_border_of_a_polygon_as_faces(hashref p)
-#
-# @todo Documentation.
-sub the_border_of_a_polygon_as_faces {
-    my ($p) = @_;
-    my @path = ();
-
-    # search for leftmost pixel on the upmost line
-    my @lines = sort {$a<=>$b} keys %$p;
-    my $pieces = $p->{$lines[0]};
-    my @start = ($lines[0]);
-    for my $piece (@$pieces) {
-	$start[1] = $piece->[0] if !defined $start[1] or $start[1] > $piece->[0];
-    }
-    
-    # the pixel in direction 1 (up) is definitely not on the polygon
-    # search for the first direction clockwise which goes to a polygon cell
-    my $d = 1;
-    while (!in_polygon($p, movecell(0,@start,$d))) {
-	$d++; $d = 1 if $d > 8;
-	last if $d == 1;
-    }
-    if ($d == 1) {
-	# one cell
-	push @path, ['T', @start];
-	push @path, ['R', @start];
-	push @path, ['B', @start];
-	push @path, ['L', @start];
-	return \@path;
-    }
-    
-    push @path, ['T', @start];
-    my $d_prev = 3;
-
-    my @mover = @start;
-    my $d_first = 0;
-    my @c1;
-    my @c2;
-    my @c3;
-    while (1) {
-	
-	# the direction where to go
-	while (!in_polygon($p, movecell(0,@mover,$d))) {
-	    $d++; $d = 1 if $d > 8;
-	}
-	
-	# we prefer to move to dir 1,3,5,or 7
-	if ($d % 2 == 0) {
-	    my $d2 = $d+1; $d2 = 1 if $d2 > 8;
-	    if (in_polygon($p, movecell(0,@mover,$d2))) {
-				$d = $d2;
-			    }
-	}
-	
-	# are we done?
-	if ($mover[0] == $start[0] and $mover[1] == $start[1]) {
-	    if (!$d_first) {
-		$d_first = $d;
-	    } elsif ($d == $d_first) {
-		add_face_to_path(\@path, ['B', @start]) if $d_prev == 7;
-		add_face_to_path(\@path, ['L', @start]) if $d_prev >= 7 or $d_prev == 1;
-		return \@path;
-	    }
-	}
-	
-	# move
-	@c1 = @c2;
-	@c2 = @mover;
-	@mover = movecell(0,@mover,$d);
-	@c3 = @mover;
-	
-	# add faces to the path, we are sloppy and add some more than once
-	# but we'll later filter the extra out
-	
-	for my $set ([1,'L','T','R','B'],[3,'T','R','B','L'],[5,'R','B','L','T'],[7,'B','L','T','R']) {
-	    my($p,$L,$T,$R,$B) = @$set;
-	    if ($d_prev == $p and $d == dirsum($p, 6)) {
-		add_face_to_path(\@path, [$L, @c1]);
-	    }
-	    elsif ($d_prev == $p and $d == dirsum($p, 7)) {
-		add_face_to_path(\@path, [$L, @c2]);
-		add_face_to_path(\@path, [$B, @c3]);
-	    }
-	    elsif ($d_prev == $p and $d == $p) {
-		add_face_to_path(\@path, [$L, @c2]);
-	    }
-	    elsif ($d_prev == $p and $d == dirsum($p, 1)) {
-		add_face_to_path(\@path, [$L, @c2]);
-		add_face_to_path(\@path, [$T, @c2]);
-		add_face_to_path(\@path, [$L, @c3]);
-	    }
-	    elsif ($d_prev == $p and $d == dirsum($p, 2)) {
-		add_face_to_path(\@path, [$L, @c2]);
-		add_face_to_path(\@path, [$T, @c2]);
-	    }
-	    elsif ($d_prev == $p and $d == dirsum($p, 3)) {
-		add_face_to_path(\@path, [$L, @c2]);
-		add_face_to_path(\@path, [$T, @c2]);
-		add_face_to_path(\@path, [$R, @c2]);
-	    }
-	    elsif ($d_prev == $p and $d == dirsum($p, 4)) {
-		add_face_to_path(\@path, [$L, @c2]);
-		add_face_to_path(\@path, [$T, @c2]);
-		add_face_to_path(\@path, [$R, @c2]);
-	    }
-	}
-	
-	for my $set ([2,"L","T","R","B"],[4,"T","R","B","L"],[6,"R","B","L","T"],[8,"B","L","T","R"]) {
-	    my($p,$L,$T,$R,$B) = @$set;
-	    if ($d_prev == $p and $d == dirsum($p, 6)) {
-		add_face_to_path(\@path, [$T, @c1]);
-		add_face_to_path(\@path, [$L, @c2]);
-		add_face_to_path(\@path, [$B, @c3]);
-	    }
-	    elsif ($d_prev == $p and $d == dirsum($p, 7)) {
-		add_face_to_path(\@path, [$T, @c1]);
-		add_face_to_path(\@path, [$L, @c2]);
-	    }
-	    elsif ($d_prev == $p and $d == $p) {
-		add_face_to_path(\@path, [$T, @c1]);
-		add_face_to_path(\@path, [$L, @c2]);
-		add_face_to_path(\@path, [$T, @c2]);
-		add_face_to_path(\@path, [$L, @c3]);
-	    }
-	    elsif ($d_prev == $p and $d == dirsum($p, 1)) {
-		add_face_to_path(\@path, [$T, @c1]);
-		add_face_to_path(\@path, [$L, @c2]);
-		add_face_to_path(\@path, [$T, @c2]);
-	    }
-	    elsif ($d_prev == $p and $d == dirsum($p, 2)) {
-		add_face_to_path(\@path, [$T, @c1]);
-		add_face_to_path(\@path, [$L, @c2]);
-		add_face_to_path(\@path, [$T, @c2]);
-		add_face_to_path(\@path, [$R, @c2]);
-		add_face_to_path(\@path, [$T, @c3]);
-	    }
-	    elsif ($d_prev == $p and $d == dirsum($p, 3)) {
-		add_face_to_path(\@path, [$T, @c1]);
-		add_face_to_path(\@path, [$L, @c2]);
-		add_face_to_path(\@path, [$T, @c2]);
-		add_face_to_path(\@path, [$R, @c2]);
-	    }
-	    elsif ($d_prev == $p and $d == dirsum($p, 4)) {
-		add_face_to_path(\@path, [$T, @c1]);
-		add_face_to_path(\@path, [$L, @c2]);
-		add_face_to_path(\@path, [$T, @c2]);
-		add_face_to_path(\@path, [$R, @c2]);
-		add_face_to_path(\@path, [$B, @c2]);
-		add_face_to_path(\@path, [$R, @c3]);
-	    }
-	}
-	
-	$d_prev = $d;
-	
-	# seed for where to go next
-	$d = dirsum($d, 6);
-    }
-}
-
-## @fn void add_face_to_path(listref path, listref face)
-#
-# @todo Documentation.
-sub add_face_to_path {
-    my($path, $face) = @_;
-    return unless @$face == 3;
-    # our system may try to add the same face twice,
-    # or even two faces twice
-    if (@$path) {
-	return if 
-	    $path->[$#$path]->[0] eq $face->[0] and
-	    $path->[$#$path]->[1] == $face->[1] and
-	    $path->[$#$path]->[2] == $face->[2];
-	if ($#$path >= 0) {
-	    return if 
-		$path->[$#$path-1]->[0] eq $face->[0] and
-		$path->[$#$path-1]->[1] == $face->[1] and
-		$path->[$#$path-1]->[2] == $face->[2];
-	}
-    }
-    push @$path, $face;
-}
-
-## @fn $in_polygon(hashref polygon, $line, $j)
-#
-# @brief Checks if the given coordinates are inside some polygon.
-# @param[in] polygon Reference to an hash having as values references to each of the
-# lines included in the polygon as hashes, whose keys are the line number and 
-# values is a two dimensional array having the left and right 
-# endings of each single connected piece on every row [[left, right], 
-# [left, right], ...].
-# @param[in] line The number of the row in a grid to check for the polygon.
-# @param[in] j The number of the column in a grid to check for the polygon..
-# @return Returns true if a polygon includes the given coordinates, else false.
-sub in_polygon {
-    my($polygon, $line, $j) = @_;
-    return 0 unless exists $polygon->{$line};
-    for my $piece (@{$polygon->{$line}}) {
-	return 1 if ($piece->[0] <= $j and $j <= $piece->[1]);
-    }
-    return 0;
-}
-
-## @method Geo::Vector vectorize(%param)
-#
-# @brief Polygonizes the raster and saves it as a polygon layer.
-# @param[in] param is a hash having named parameters, which are given to the 
-# constructor of the new Geo::Vector. The
-# named parameter 'connectivity' (default 8) can be used to set the
-# connectivity by which the polygons are delineated.
-# @return The new vector layer.
-sub vectorize {
-    my ($self, %param) = @_;
-
-    my $cell_size = $self->cell_size();
-
-    my ($minX,$minY,$maxX,$maxY) = $self->world();
-
-    my $vector = Geo::Vector->new(%param, geometry_type => 'Polygon', update => 1);
-
-    croak "layer with name: '$param{layer}' already exists" if $vector->geometry_type ne 'Polygon' or $vector->feature_count() > 0;
-
-    my $schema = $vector->{ogr_layer}->GetLayerDefn();
-
-    my $polygons = $self->polygonize($param{connectivity});
-
-    for my $k (keys %$polygons) {
-
-	my $element = $polygons->{$k}->{value};
-	
-	my $f = new Geo::OGR::Feature($schema);
-	my $g = new Geo::OGR::Geometry($Geo::OGR::wkbPolygon);
-	my $r = new Geo::OGR::Geometry($Geo::OGR::wkbLinearRing);
-	
-	$DEBUG = $k == 15 ? 1 : 0;
-	my $path = the_border_of_a_polygon($polygons->{$k}->{lines});
-	
-	for my $point (@$path) {
-	    $r->AddPoint($minX + $point->[1] * $cell_size, $maxY - $point->[0] * $cell_size);
-	}
-	
-	$g->AddGeometry($r);
-	$g->CloseRings;
-	$f->SetGeometry($g);
-	$vector->add_feature($f);
-	
-    }
+    my $dataset = $self->dataset;
+    my $band = $dataset->Band(1);
+    my $layer = $vector->{OGR}->{Layer};
+    eval {
+	Geo::GDAL::Polygonize($band, undef, $layer, $params{pixel_value_field}, $params{options}, $params{callback}, $params{callback_date});
+	};
+    croak "$@" if $@;
 
     return $vector;
 }
 
 ## @method Geo::Raster ca_step(@k)
 #
-# @brief Converts each cell value of the grid into a value gotten by summing the 
-# neighbor values of the cell multiplied by the given mask.
+# @brief Perform a cellular automata step.
 #
-# @param[in] k Array (having 0-9 values) defining the values with which the cell 
-# neighbor and the cell is multiplied. The indexes of the array for the 
-# neighbors are:<BR>
+# @param[in] k Array defining the cellular automaton defining the
+# values with which the cell neighbor and the cell is multiplied. The
+# indexes of the array for the neighbors are:<BR>
 # 8 1 2<BR>
 # 7 0 3<BR>
 # 6 5 4
 #
-# @return In void context (no return grid is wanted) the method changes this 
-# grid, otherwise the method returns a new grid with the thinning done.
-# @note The grid can have real or integer type.
+# The new value for the cell is a k weighted sum of the neighborhood
+# cell values.
+#
+# @return a new raster. In void context changes this raster.
 sub ca_step {
     my($self, @k) = @_;
     if (defined wantarray) {

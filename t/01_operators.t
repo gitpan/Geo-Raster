@@ -5,6 +5,10 @@ BEGIN {
     use_ok( 'Geo::Raster' );
 }
 
+$a = Geo::Raster->new(10,10);
+$a+=10;
+ok($a->get(1,1) == 10,'+=');
+
 sub diff {
     my ($a1,$a2) = @_;
     #print "$a1 == $a2?\n";

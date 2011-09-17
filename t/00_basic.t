@@ -5,6 +5,12 @@ BEGIN {
     use_ok( 'Geo::Raster' );
 }
 
+#use PDL::NetCDF;
+
+#my $ncobj = PDL::NetCDF->new ('t2m.SMHI.HCA2.nc');
+#my $slice = $ncobj->get('t2m', [100, 0, 0, 0], [1, 1, 86, 90]);
+#my $a = Geo::Raster->new($slice);
+
 sub diff {
     my ($a1,$a2) = @_;
     #print "$a1 == $a2?\n";
@@ -46,6 +52,11 @@ sub diff {
 
 for my $datatype1 ('int','real') {
     my $gd1 = new Geo::Raster($datatype1,5,10);
+
+    my $mem = $gd1->band;
+
+    ok($mem->{XSize} == 10, "GDAL mem dataset and band");
+
     $gd1->set(5);
     ok(diff($gd1->cell(3,3),5),'set & get');
     for my $datatype2 (undef,'int','real') {
@@ -109,13 +120,13 @@ for my $datatype1 ('','int','real') {
 }
 
 {
-    my $test_grid = 'test_grid.bil';
+    my $test_grid = 'test_grid';
     for my $datatype ('int','real') {
 	my $gd1 = new Geo::Raster($datatype,5,10);
 	$gd1->set(5);
-	$gd1->save($test_grid);
-	my $gd2 = new Geo::Raster filename=>$test_grid,load=>1;
-	ok(diff($gd1->cell(3,3),$gd2->cell(3,3)),'save/open');
+	$gd1->save($test_grid.'.bil');
+	my $gd2 = new Geo::Raster filename=>$test_grid.'.bil', load=>1 ;
+	ok(diff($gd1->cell(3,3),$gd2->cell(3,3)), 'save/open');
     }
     for ('.hdr','.bil') {unlink($test_grid.$_)};
     
@@ -152,15 +163,15 @@ for my $datatype1 ('','int','real') {
 	#    print STDERR "bo: $_ $o{$_}\n";
 	#}
 	$gd1->world(%o);
-	my @attrib = $gd1->attributes();
+	my @attrib = $gd1->_attributes();
 	for (1..5) {
 	    ok(diff($bounds{$bm{$_}},$attrib[2+$_]),"setting world");
 	}
     }
     my $gd2 = new Geo::Raster(5,10);
     $gd1->copy_world_to($gd2);
-    my @attrib1 = $gd1->attributes();
-    my @attrib2 = $gd2->attributes();
+    my @attrib1 = $gd1->_attributes();
+    my @attrib2 = $gd2->_attributes();
     for (1..5) {
 	ok(diff($attrib1[2+$_],$attrib2[2+$_]),"copy world to");
     }
@@ -172,6 +183,17 @@ for my $datatype1 ('','int','real') {
     my @point = $gd->g2w(3,7);
     my @cell = $gd->w2g(@point);
     ok(($cell[0] == 3 and $cell[1] == 7),"world coordinates <-> grid coordinates");
+    ok(not($gd->cell_in(-1,5) and $gd->cell_in(2,13) and 
+	   $gd->cell_in(7,5) and $gd->cell_in(2,-1)) and $gd->cell_in(2,5), "cell in");
+    ok(not($gd->point_in(10,0) and $gd->point_in(20,4) and 
+	   $gd->point_in(10,12) and $gd->point_in(0,5)) and $gd->point_in(10,3), "point in");
+    $gd->save('t/data/test.bil');
+    $gd = Geo::Raster->new(filename=>'t/data/test.bil',load=>1);
+    ok(($cell[0] == 3 and $cell[1] == 7),"world coordinates <-> grid coordinates");
+    ok(not($gd->cell_in(-1,5) and $gd->cell_in(2,13) and 
+	   $gd->cell_in(7,5) and $gd->cell_in(2,-1)) and $gd->cell_in(2,5), "cell in");
+    ok(not($gd->point_in(10,0) and $gd->point_in(20,4) and 
+	   $gd->point_in(10,12) and $gd->point_in(0,5)) and $gd->point_in(10,3), "point in");
 }
 
 {
@@ -211,4 +233,14 @@ for my $datatype1 ('','int','real') {
 	ok($g->get(1,4) == 56, "map $datatype 2");
 	
     }  
+}
+
+{
+    my $g1 = new Geo::Raster('int',5,5);
+    my $g2 = new Geo::Raster('int',5,5);
+    my $g3 = new Geo::Raster('int',1,5);
+    my $t1 = $g1->overlayable($g2);
+    my $t2 = $g1->overlayable($g3);
+    ok($t1 == 1, "overlayability");
+    ok($t2 == 0, "overlayability");
 }

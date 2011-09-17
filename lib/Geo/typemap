@@ -3,7 +3,6 @@ TYPEMAP
 	ral_cell * T_PTROBJ
 	ral_point * T_PTROBJ
 	ral_geometry * T_PTROBJ
-	ral_pixbuf * T_PTROBJ
 	ral_integer_grid_layer * T_PTROBJ
 	ral_real_grid_layer * T_PTROBJ
 	double * T_DOUBLEP
@@ -14,6 +13,12 @@ TYPEMAP
 	RAL_REAL * T_FLOATP
 	GDALDatasetH T_PTROBJ
 	GDALColorTableH T_PTROBJ
+	gtk2_ex_geo_pixbuf * T_PTROBJ
+	ral_layer * T_PTROBJ
+	ral_pixbuf * T_PTROBJ
+	ral_visual_layer * T_PTROBJ
+	ral_visual_feature_table * T_PTROBJ
+	OGRLayerH T_PTROBJ
 
 INPUT
 
