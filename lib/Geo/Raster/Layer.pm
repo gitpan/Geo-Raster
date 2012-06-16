@@ -16,11 +16,10 @@ use strict;
 use warnings;
 use POSIX;
 POSIX::setlocale( &POSIX::LC_NUMERIC, "C" ); # http://www.remotesensing.org/gdal/faq.html nr. 11
-use FileHandle;
 use Carp;
-use Scalar::Util qw(blessed);
+use Scalar::Util 'blessed';
+use File::Basename; # for fileparse
 use File::Spec;
-use File::Basename;
 use Glib qw/TRUE FALSE/;
 use Gtk2;
 use Gtk2::Ex::Geo::Layer qw /:all/;
@@ -37,7 +36,7 @@ our @ISA = qw(Exporter Geo::Raster Gtk2::Ex::Geo::Layer);
 our %EXPORT_TAGS = ( 'all' => [ qw( %EPSG ) ] );
 our @EXPORT_OK = ( @{ $EXPORT_TAGS{'all'} } );
 our @EXPORT = qw();
-our $VERSION = 0.03;
+our $VERSION = 0.04;
 
 use vars qw/%EPSG @EPSG/;
 
@@ -105,7 +104,7 @@ sub save_all_rasters {
     my @rasters;
     if ($gui->{overlay}->{layers}) {
 	for my $layer (@{$gui->{overlay}->{layers}}) {
-	    if ($layer->isa('Geo::Raster')) {
+	    if (blessed($layer) and $layer->isa('Geo::Raster')) {
 		next if $layer->{GDAL};
 		push @rasters, $layer;
 	    }
@@ -140,8 +139,7 @@ sub save_all_rasters {
 ## @ignore
 sub upgrade {
     my($object) = @_;
-    return 0 unless blessed($object);
-    if ($object->isa('Geo::Raster') and !$object->isa('Geo::Raster::Layer')) {
+    if (blessed($object) and $object->isa('Geo::Raster') and !(blessed($object) and $object->isa('Geo::Raster::Layer'))) {
 	bless($object, 'Geo::Raster::Layer');
 	$object->defaults();
 	return 1;
@@ -202,14 +200,13 @@ sub save {
     my($self, $filename, $format) = @_;
     $self->SUPER::save($filename, $format);
     if ($self->{COLOR_TABLE} and @{$self->{COLOR_TABLE}}) {
-	my $fh = new FileHandle;
-	croak "can't write to $filename.clr: $!\n" unless $fh->open(">$filename.clr");
+	open(my $fh, '>', "$filename.clr") or croak "can't write to $filename.clr: $!\n";
 	for my $color (@{$self->{COLOR_TABLE}}) {
 	    next if $color->[0] < 0 or $color->[0] > 255;
 	    # skimming out data because this format does not support all
 	    print $fh "@$color[0..3]\n";
 	}
-	$fh->close;
+	close($fh);
 	eval {
 	    $self->save_color_table("$filename.color_table");
 	};
@@ -394,7 +391,6 @@ sub open_polygonize_dialog {
 ##@ignore
 sub epsg_help {
     my $entry = shift;
-    my $text = $entry->get_text;
     my $auto = $entry->get_completion;
     my $list = $auto->get_model if $auto;
 
@@ -404,24 +400,33 @@ sub epsg_help {
 	    if (CORE::open(EPSG, $f)) {
 		while (<EPSG>) {
 		    next unless /^\d/;
-		    my @t = split/,/;
-		    $t[1] =~ s/^"//;
-		    $t[1] =~ s/"$//;
-		    $EPSG{$t[1].' ['.$t[0].']'} = $t[0];
+		    my $code; 
+		    $code = $1 if s/^(\d+)//;
+		    my $desc;
+		    if (/^,"/) {
+			$desc = $1 if s/^,"(.+?)"//;
+		    } else {
+			$desc = $1 if s/^,(.+?),//;
+		    }
+		    $EPSG{$code} = "$desc [$code]";
 		}
 		close EPSG;
 	    }
 	}
-	@EPSG = sort {$a cmp $b} keys %EPSG;
     }
 
     if ($list) {
 	$list->clear;
+	my $text = $entry->get_text;
+	$text =~ s/\(/\\(/g;
+	$text =~ s/\)/\\)/g;
+	$text =~ s/\[/\\[/g;
+	$text =~ s/\]/\\]/g;
 	my $i = 0;
-	for (@EPSG) {
-	    next unless /$text/i;
+	for my $code (keys %EPSG) {
+	    next unless $EPSG{$code} =~ /$text/i;
 	    my $iter = $list->append();
-	    $list->set($iter, 0, $_);
+	    $list->set($iter, 0, $EPSG{$code});
 	    last if ($i++) > 10;
 	}
     }
