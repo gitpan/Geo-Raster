@@ -6,10 +6,10 @@ package Geo::Raster;
 # Import tags:
 # - \a logics Imports (overrides) \c not, \c and, and \c or
 #
-# This module should be discussed in geo-perl@list.hut.fi.
+# This module should be discussed in https://list.hut.fi/mailman/listinfo/geo-perl
 #
 # The homepage of this module is 
-# http://geoinformatics.tkk.fi/twiki/bin/view/Main/GeoinformaticaSoftware.
+# https://github.com/ajolma/geoinformatica.
 #
 # @author Ari Jolma
 # @author Copyright (c) 1999- by Ari Jolma
@@ -22,8 +22,8 @@ package Geo::Raster;
 
 Geo::Raster - Perl extension for geospatial rasters
 
-The <a href="http://map.hut.fi/doc/Geoinformatica/html/">
-documentation of Geo::Raster</a> is written in doxygen format.
+The <a href="http://geoinformatics.aalto.fi/doc/Geoinformatica/html/">
+documentation for Geo::Raster</a> is written in doxygen format.
 
 =cut
 
@@ -48,7 +48,7 @@ use Geo::Raster::TerrainAnalysis;
 use Geo::Raster::Geostatistics;
 use Geo::Raster::Layer; # requires Gtk2 and Gtk2::Ex::Geo
 
-our $VERSION = '0.64';
+our $VERSION = '0.65';
 
 # TODO: make these constants derived from libral:
 our $INTEGER_GRID = 1;
@@ -835,6 +835,13 @@ sub _datatype {
 # or 'Real'.
 sub datatype {
     my $self = shift;
+    if ($self->{GDAL} and $self->{GDAL}->{dataset}) {
+	my $t = $self->{GDAL}->{dataset}->GetRasterBand($self->{GDAL}->{band})->DataType;
+	return 'GDAL Complex Data Type' if $t =~ /^C/;
+	return 'Integer' if $t eq 'Byte' or $t =~ /Int/;
+	return 'Real' if $t =~ /Float/;
+	return 'Unknown GDAL Data Type';
+    }
     return unless $self->{GRID};
     $self->{DATATYPE} = ral_grid_get_datatype($self->{GRID});
     return 'Integer' if $self->{DATATYPE} == $INTEGER_GRID;
@@ -1589,14 +1596,14 @@ __END__
 
 Geo::GDAL
 
-This module should be discussed in geo-perl@list.hut.fi.
+This module should be discussed in https://list.hut.fi/mailman/listinfo/geo-perl
 
 The homepage of this module is
-http://geoinformatics.tkk.fi/twiki/bin/view/Main/GeoinformaticaSoftware.
+https://github.com/ajolma/geoinformatica
 
 =head1 AUTHOR
 
-Ari Jolma, ari.jolma _at_ tkk.fi
+Ari Jolma, ari.jolma _at_ aalto.fi
 
 =head1 COPYRIGHT AND LICENSE
 

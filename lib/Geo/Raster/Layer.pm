@@ -36,7 +36,7 @@ our @ISA = qw(Exporter Geo::Raster Gtk2::Ex::Geo::Layer);
 our %EXPORT_TAGS = ( 'all' => [ qw( %EPSG ) ] );
 our @EXPORT_OK = ( @{ $EXPORT_TAGS{'all'} } );
 our @EXPORT = qw();
-our $VERSION = 0.04;
+our $VERSION = 0.03;
 
 use vars qw/%EPSG @EPSG/;
 
@@ -357,7 +357,8 @@ sub render {
 
     $self->{GRAYSCALE_SUBTYPE_VALUE} = $GRAYSCALE_SUBTYPE{$self->{GRAYSCALE_SUBTYPE}};
 
-    if ($self->datatype eq 'Integer') {	    
+    my $datatype = $self->datatype || '';
+    if ($datatype eq 'Integer') {	    
 
 	my $layer = Geo::Raster::ral_make_integer_grid_layer($self);
 	if ($layer) {
@@ -365,7 +366,7 @@ sub render {
 	    Geo::Raster::ral_destroy_integer_grid_layer($layer);
 	}
 
-    } elsif ($self->datatype eq 'Real') {
+    } elsif ($datatype eq 'Real') {
 	
 	my $layer = Geo::Raster::ral_make_real_grid_layer($self);
 	if ($layer) {
@@ -374,7 +375,7 @@ sub render {
 	}
 
     } else {
-	croak("bad Geo::Raster::Layer");
+	croak("bad Geo::Raster::Layer datatype: $datatype");
     }
 }
 
